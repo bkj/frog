@@ -15,6 +15,13 @@ Python >= 3.5.5, PyTorch == 0.3.1, torchvision >= 0.2.1
 ```
 PyTorch 0.4 will be supported soon.
 
+## Installation
+```
+conda create -n dart_env python=3.6 pip -y
+source activate dart_env
+conda install pytorch==0.3.1 torchvision cuda91 -c pytorch -y
+```
+
 ## Datasets
 Instructions for acquiring PTB and WT2 can be found [here](https://github.com/salesforce/awd-lstm-lm). While CIFAR-10 can be automatically downloaded by torchvision, ImageNet needs to be manually downloaded (preferably to a SSD) following the instructions [here](https://github.com/pytorch/examples/tree/master/imagenet).
 
