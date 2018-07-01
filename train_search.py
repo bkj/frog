@@ -1,213 +1,187 @@
+#!/usr/bin/env python
+
+"""
+  train_search.py
+"""
+
+from __future__ import print_function, division
+
 import os
 import sys
-import time
-import glob
 import json
-import numpy as np
-import torch
-import itertools
 import argparse
+import itertools
+import numpy as np
 from tqdm import tqdm
-import torch.nn as nn
-import torch.utils
-import torch.nn.functional as F
+from time import time
+from sklearn.model_selection import train_test_split
+
+import torch
+from torch import nn
+from torch.nn import functional as F
+import torch.utils.data
 from torchvision import datasets
 
 import utils
-from torch.autograd import Variable
-from model_search import Network
 from genotypes import PRIMITIVES
+from model_search import DARTSearchNetwork
 
+from basenet import BaseNet, Metrics, HPSchedule
 from basenet.helpers import set_seeds
 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
+# --
+# CLI
 
 def parse_args():
   parser = argparse.ArgumentParser("cifar")
   parser.add_argument('--outpath', type=str, default="results/search/0")
   parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
-  parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+  parser.add_argument('--batch-size', type=int, default=64, help='batch size')
   
-  parser.add_argument('--learning_rate', type=float, default=0.025, help='init learning rate')
-  parser.add_argument('--learning_rate_min', type=float, default=0.001, help='min learning rate')
-  parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
-  parser.add_argument('--weight_decay', type=float, default=3e-4, help='weight decay')
+  parser.add_argument('--lr-max', type=float, default=0.025)
+  parser.add_argument('--lr-min', type=float, default=0.001)
+  parser.add_argument('--momentum', type=float, default=0.9)
+  parser.add_argument('--weight-decay', type=float, default=3e-4)
   
   parser.add_argument('--num-classes', type=int, default=10)
-  parser.add_argument('--init_channels', type=int, default=16, help='num of init channels')
-  parser.add_argument('--layers', type=int, default=8, help='total number of layers')
+  parser.add_argument('--init-channels', type=int, default=16)
+  parser.add_argument('--layers', type=int, default=8)
+  parser.add_argument('--steps', type=int, default=4)
   
-  parser.add_argument('--arch_learning_rate', type=float, default=3e-4, help='learning rate for arch encoding')
-  parser.add_argument('--arch_weight_decay', type=float, default=1e-3, help='weight decay for arch encoding')
+  parser.add_argument('--arch-lr', type=float, default=3e-4)
+  parser.add_argument('--arch-weight-decay', type=float, default=1e-3)
   
   parser.add_argument('--seed', type=int, default=123)
   return parser.parse_args()
 
+# --
+# Run
 
-if __name__ == "__main__":
-  args = parse_args()
+args = parse_args()
+
+num_ops = len(PRIMITIVES)
+
+set_seeds(args.seed)
+
+train_transform, valid_transform = utils._data_transforms_cifar10(cutout=False)
+train_data = datasets.CIFAR10(root='./data', train=True, download=False, transform=train_transform)
+valid_data = datasets.CIFAR10(root='./data', train=False, download=False, transform=valid_transform)
+
+# Is this necessary?
+train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5)
+
+class ZipDataloader:
+  def __init__(self, dataloaders):
+    self.dataloaders = dataloaders
   
-  steps = 4
-  num_ops = len(PRIMITIVES)
+  def __len__(self):
+    return max([len(d) for d in self.dataloaders])
   
-  set_seeds(args.seed)
-  
-  train_transform, valid_transform = utils._data_transforms_cifar10(cutout=False)
-  train_data = datasets.CIFAR10(root='../data', train=True, download=False, transform=train_transform)
-  valid_data = datasets.CIFAR10(root='../data', train=False, download=False, transform=valid_transform)
-  
-  indices = np.arange(len(train_data))
-  split   = int(np.floor(0.5 * len(train_data)))
-  
-  dataloaders = {
-    "train"  : torch.utils.data.DataLoader(
+  def __iter__(self):
+    counter = 0
+    iters = [iter(d) for d in self.dataloaders]
+    while counter < len(self):
+      yield tuple(zip(*[next(it) for it in iters]))
+      counter += 1
+
+dataloaders = {
+  "train"  : ZipDataloader([
+    torch.utils.data.DataLoader(
       dataset=train_data,
       batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[:split]), # !! Is there a real reason to keep these separate?
-      pin_memory=True,
-      num_workers=2,
+      sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
+      pin_memory=False,
+      num_workers=4,
     ),
-    "search" : torch.utils.data.DataLoader(
+    torch.utils.data.DataLoader(
       dataset=train_data,
       batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(indices[split:]), # !! Is there a real reason to keep these separate?
-      pin_memory=True,
-      num_workers=2,
-    ),
-    "valid"  : torch.utils.data.DataLoader(
-      dataset=valid_data,
-      batch_size=args.batch_size,
-      shuffle=False,
-      pin_memory=True,
-      num_workers=2,
+      sampler=torch.utils.data.sampler.SubsetRandomSampler(search_indices),
+      pin_memory=False,
+      num_workers=4,
     )
-  }
-  
-  # --
-  # Define model
-  
-  model = Network(args.init_channels, args.num_classes, args.layers, steps=steps).cuda()
-  optimizer = torch.optim.SGD(
-      params=model.parameters(),
-      lr=args.learning_rate,
-      momentum=args.momentum,
-      weight_decay=args.weight_decay
+  ]),
+  "valid"  : torch.utils.data.DataLoader(
+    dataset=valid_data,
+    batch_size=args.batch_size,
+    shuffle=False,
+    pin_memory=True,
+    num_workers=2,
   )
-  model_lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, float(args.epochs), eta_min=args.learning_rate_min)
+}
+
+# --
+# Define model
+
+class Architecture(BaseNet):
+  def __init__(self, steps, num_ops, scale=1e-3):
+    super().__init__(loss_fn=F.cross_entropy)
+    
+    self.steps   = steps
+    self.num_ops = num_ops
+    
+    n_edges     = 2 * steps + sum(range(steps)) # Connections to inputs + connections to earlier steps
+    self.normal = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
+    self.reduce = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
   
-  # --
-  # Define meta-model
+  def __repr__(self):
+    return 'Architecture(steps=%d | num_ops=%d)' % (self.steps, self.num_ops)
+
+cuda = torch.device('cuda')
+arch = Architecture(steps=args.steps, num_ops=num_ops).to(cuda)
+arch.init_optimizer(
+  opt=torch.optim.Adam,
+  params=arch.parameters(),
+  lr=args.arch_lr,
+  betas=(0.5, 0.999),
+  weight_decay=args.arch_weight_decay,
+  clip_grad_norm=10.
+)
+
+model = DARTSearchNetwork(
+  arch=arch,
+  C=args.init_channels,
+  num_classes=args.num_classes,
+  layers=args.layers,
+  steps=args.steps,
+).to(cuda)
+model.verbose = True
+
+model.init_optimizer(
+  opt=torch.optim.SGD,
+  params=model.parameters(),
+  hp_scheduler={
+    "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
+  },
+  momentum=args.momentum,
+  weight_decay=args.weight_decay,
+  clip_grad_norm=5.0,
+)
+
+# --
+# Run
+
+t = time()
+for epoch in range(args.epochs):
+  train = model.train_epoch(dataloaders, mode='train', compute_acc=True)
+  valid = model.eval_epoch(dataloaders, mode='valid', compute_acc=True)
   
-  k = sum(1 for i in range(steps) for n in range(2+i))
-  scale = 1e-3
-  arch_parameters = [
-    Variable(scale * torch.randn(k, num_ops).cuda(), requires_grad=True),
-    Variable(scale * torch.randn(k, num_ops).cuda(), requires_grad=True),
-  ]
+  print(json.dumps({
+    "epoch"      : int(epoch),
+    "train_loss" : float(np.mean(train['loss'][-10:])),
+    "train_acc"  : float(train['acc']),
+    "valid_loss" : float(np.mean(valid['loss'])),
+    "valid_acc"  : float(valid['acc']),
+  }))
+  sys.stdout.flush()
   
-  arch_optimizer = torch.optim.Adam(
-    params=arch_parameters,
-    lr=args.arch_learning_rate,
-    betas=(0.5, 0.999),
-    weight_decay=args.arch_weight_decay
-  )
-  
-  # --
-  # Run
-  
-  for epoch in range(args.epochs):
-    _ = model_lr_scheduler.step()
-    
-    # --
-    # Train loop
-    
-    _ = model.train()
-    train_n_total, train_n_correct, train_loss = 0, 0, 0
-    gen = zip(dataloaders['train'], itertools.cycle(dataloaders['search']))
-    gen = tqdm(gen, total=len(dataloaders['train']))
-    for ((input_train, target_train), (input_search, target_search)) in gen:
-      
-      # Arch step (no unrolled yet)
-      arch_optimizer.zero_grad()
-      input_search  = Variable(input_search, requires_grad=False).cuda()
-      target_search = Variable(target_search, requires_grad=False).cuda(async=True)
-      loss  = F.cross_entropy(model(input_search, arch_parameters), target_search)
-      loss.backward()
-      nn.utils.clip_grad_norm(arch_parameters, 10.)
-      arch_optimizer.step()
-      arch_optimizer.zero_grad()
-      
-      # Model step
-      optimizer.zero_grad()
-      input_train  = Variable(input_train, requires_grad=False).cuda()
-      target_train = Variable(target_train, requires_grad=False).cuda(async=True)
-      preds = model(input_train, arch_parameters)
-      loss  = F.cross_entropy(preds, target_train)
-      loss.backward()
-      nn.utils.clip_grad_norm(model.parameters(), 5.)
-      optimizer.step()
-      optimizer.zero_grad()
-      
-      train_n_correct += int((preds.max(dim=-1)[1] == target_train).int().sum())
-      train_n_total   += int(input_train.shape[0])
-      train_loss      += float(loss.data)
-      
-      gen.set_postfix(**{
-        "epoch"      : int(epoch),
-        "train_loss" : float(train_loss / train_n_total),
-        "train_acc"  : float(train_n_correct / train_n_total),
-      })
-      
-      del input_search
-      del target_search
-      del input_train
-      del target_train
-      del preds
-    
-    # --
-    # Valid loop
-    
-    _ = model.eval()
-    
-    valid_n_total, valid_n_correct, valid_loss = 0, 0, 0
-    gen = tqdm(dataloaders['valid'], total=len(dataloaders['valid']))
-    for (input_valid, target_valid) in gen:
-      input_valid  = Variable(input_valid, requires_grad=False).cuda()
-      target_valid = Variable(target_valid, requires_grad=False).cuda(async=True)
-      
-      preds           = model(input_valid, arch_parameters)
-      valid_n_correct += int((preds.max(dim=-1)[1] == target_valid).int().sum().cpu())
-      valid_n_total   += int(input_valid.shape[0])
-      valid_loss      += F.cross_entropy(preds, target_valid).data.cpu()
-      
-      gen.set_postfix(**{
-        "epoch"      : int(epoch),
-        "valid_loss" : float(valid_loss / valid_n_total),
-        "valid_acc"  : float(valid_n_correct / valid_n_total),
-      })
-      
-      del input_valid
-      del target_valid
-      del preds
-    
-    # --
-    # Log
-    
-    print(json.dumps({
-      "epoch"      : int(epoch),
-      "train_loss" : float(train_loss / train_n_total),
-      "train_acc"  : float(train_n_correct / train_n_total),
-      "valid_loss" : float(valid_loss / valid_n_total),
-      "valid_acc"  : float(valid_n_correct / valid_n_total),
-    }))
-    sys.stdout.flush()
-    
-    torch.save(model.state_dict(), os.path.join(args.outpath, 'weights.pt'))
-    torch.save(arch_parameters[0], os.path.join(args.outpath, 'normal_arch_e%d.pt' % epoch))
-    torch.save(arch_parameters[1], os.path.join(args.outpath, 'reduce_arch_e%d.pt' % epoch))
+  torch.save(model.state_dict(), os.path.join(args.outpath, 'weights.pt'))
+  torch.save(arch.normal, os.path.join(args.outpath, 'normal_arch_e%d.pt' % epoch))
+  torch.save(arch.reduce, os.path.join(args.outpath, 'reduce_arch_e%d.pt' % epoch))
 
 
 

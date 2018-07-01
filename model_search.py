@@ -1,6 +1,14 @@
+#!/usr/bin/env python
+
+"""
+  model_search.py
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from basenet import BaseNet
 
 from operations import *
 from genotypes import PRIMITIVES
@@ -20,7 +28,7 @@ class MixedOp(nn.Module):
     return sum(w * op(x) for w, op in zip(weights, self._ops))
 
 
-class Cell(nn.Module):
+class DARTSearchCell(nn.Module):
   def __init__(self, steps, multiplier, C_prev_prev, C_prev, C, reduction, reduction_prev):
     super().__init__()
     
@@ -55,10 +63,11 @@ class Cell(nn.Module):
     return torch.cat(states[-self._multiplier:], dim=1)
 
 
-class Network(nn.Module):
-  def __init__(self, C, num_classes, layers, steps=4, multiplier=4, stem_multiplier=3):
-    super().__init__()
+class DARTSearchNetwork(BaseNet):
+  def __init__(self, arch, C, num_classes, layers, steps=4, multiplier=4, stem_multiplier=3):
+    super().__init__(loss_fn=F.cross_entropy)
     
+    self._arch        = arch
     self._C           = C
     self._num_classes = num_classes
     self._layers      = layers
@@ -81,7 +90,7 @@ class Network(nn.Module):
       if reduction:
         C_curr *= 2
       
-      cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev)
+      cell = DARTSearchCell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev)
       reduction_prev = reduction
       self.cells += [cell]
       C_prev_prev, C_prev = C_prev, multiplier * C_curr
@@ -89,11 +98,11 @@ class Network(nn.Module):
     self.global_pooling = nn.AdaptiveAvgPool2d(1)
     self.classifier     = nn.Linear(C_prev, num_classes)
 
-  def forward(self, input, arch_parameters):
+  def forward(self, input):
     s0 = s1 = self.stem(input)
     
-    normal_weights = F.softmax(arch_parameters[0], dim=-1)
-    reduce_weights = F.softmax(arch_parameters[1], dim=-1)
+    normal_weights = F.softmax(self._arch.normal, dim=-1)
+    reduce_weights = F.softmax(self._arch.reduce, dim=-1)
     
     for cell in self.cells:
       s0, s1 = s1, cell(s0, s1, normal_weights if not cell.reduction else reduce_weights)
@@ -102,3 +111,9 @@ class Network(nn.Module):
     out = out.view(out.size(0),-1)
     out = self.classifier(out)
     return out
+  
+  def train_batch(self, data, target, metric_fns=None):
+    data_train, data_search = data
+    target_train, target_search = target
+    self._arch.train_batch(data_search, target_search, forward=self.forward)
+    return super().train_batch(data_train, target_train, metric_fns=metric_fns)
