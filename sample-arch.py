@@ -51,9 +51,6 @@ def parse_genotype(weights, steps):
         W = weights[start:end].copy()
         W = W[:,1:] # Drop nones
         top_edges = W.max(axis=-1).argsort()[::-1][:2] # 
-        print('--')
-        print(top_edges)
-        print(weights[start:end])
         for edge in top_edges:
             gene.append((PRIMITIVES[W[edge].argmax() + 1], edge))
         
@@ -72,37 +69,32 @@ if __name__ == "__main__":
     normal_logits = Variable(normal_logits.data)
     reduce_logits = Variable(reduce_logits.data)
     
-    # normal_logits[:,0] = -1000
-    # reduce_logits[:,0] = -1000
-    
     normal_weights = to_numpy(F.softmax(normal_logits, dim=-1))
     reduce_weights = to_numpy(F.softmax(reduce_logits, dim=-1))
     
-    from rsub import *
-    from matplotlib import pyplot as plt
-    _ = plt.plot(normal_weights[:,0])
-    _ = plt.plot(reduce_weights[:,0])
-    show_plot()
+    # from rsub import *
+    # from matplotlib import pyplot as plt
+    # _ = plt.plot(normal_weights[:,0])
+    # _ = plt.plot(reduce_weights[:,0])
+    # show_plot()
     
-    import seaborn as sns
-    sns.heatmap(normal_weights)
-    show_plot()
+    # import seaborn as sns
+    # sns.heatmap(normal_weights)
+    # show_plot()
 
-    import seaborn as sns
-    sns.heatmap(reduce_weights)
-    show_plot()
+    # import seaborn as sns
+    # sns.heatmap(reduce_weights)
+    # show_plot()
     
     normal_gene = parse_genotype(normal_weights, steps=args.steps)
-    print('-' * 50)
     reduce_gene = parse_genotype(reduce_weights, steps=args.steps)
     
-    # concat = range(2 + args.steps - args.multiplier, args.steps + 2)
-    # genotype = Genotype(
-    #   normal=normal_gene,
-    #   normal_concat=concat,
-    #   reduce=reduce_gene,
-    #   reduce_concat=concat,
-    # )
-    # print(md5(str(genotype).encode()).hexdigest())
-    # pprint(genotype)
-    # pickle.dump(genotype, open(args.outpath, 'wb'))
+    concat = range(2 + args.steps - args.multiplier, args.steps + 2)
+    genotype = Genotype(
+      normal=normal_gene,
+      normal_concat=concat,
+      reduce=reduce_gene,
+      reduce_concat=concat,
+    )
+    print('hash=%s' % md5(str(genotype).encode()).hexdigest())
+    pickle.dump(genotype, open(args.outpath, 'wb'))
