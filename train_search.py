@@ -193,6 +193,9 @@ if __name__ == "__main__":
       del target_valid
       del preds
     
+    # --
+    # Log
+    
     print(json.dumps({
       "epoch"      : int(epoch),
       "train_loss" : float(train_loss / train_n_total),

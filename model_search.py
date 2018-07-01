@@ -37,10 +37,10 @@ class Cell(nn.Module):
     
     self._ops = nn.ModuleList()
     for i in range(self._steps):
-      for j in range(2+i):
-        stride = 2 if reduction and j < 2 else 1
+      for idx in range(2+i):
+        stride = 2 if reduction and idx < 2 else 1
         self._ops.append(MixedOp(C, stride))
-        
+    
   def forward(self, s0, s1, weights):
     states = [
       self.preprocess0(s0),
@@ -57,10 +57,12 @@ class Cell(nn.Module):
 
 class Network(nn.Module):
   def __init__(self, C, num_classes, layers, steps=4, multiplier=4, stem_multiplier=3):
-    super(Network, self).__init__()
-    self._C = C
+    super().__init__()
+    
+    self._C           = C
     self._num_classes = num_classes
     self._layers      = layers
+    
     self._steps       = steps
     self._multiplier  = multiplier
     
@@ -73,6 +75,7 @@ class Network(nn.Module):
     C_prev_prev, C_prev, C_curr = C_curr, C_curr, C
     self.cells = nn.ModuleList()
     reduction_prev = False
+    
     for i in range(layers):
       reduction = i in [layers//3, 2 * layers//3]
       if reduction:
@@ -81,7 +84,7 @@ class Network(nn.Module):
       cell = Cell(steps, multiplier, C_prev_prev, C_prev, C_curr, reduction, reduction_prev)
       reduction_prev = reduction
       self.cells += [cell]
-      C_prev_prev, C_prev = C_prev, multiplier*C_curr
+      C_prev_prev, C_prev = C_prev, multiplier * C_curr
     
     self.global_pooling = nn.AdaptiveAvgPool2d(1)
     self.classifier     = nn.Linear(C_prev, num_classes)
@@ -99,35 +102,3 @@ class Network(nn.Module):
     out = out.view(out.size(0),-1)
     out = self.classifier(out)
     return out
-
-  # def genotype(self):
-
-  #   def _parse(weights):
-  #     gene = []
-  #     n = 2
-  #     start = 0
-  #     for i in range(self._steps):
-  #       end = start + n
-  #       W = weights[start:end].copy()
-  #       edges = sorted(range(i + 2), key=lambda x: -max(W[x][k] for k in range(len(W[x])) if k != PRIMITIVES.index('none')))[:2]
-  #       for j in edges:
-  #         k_best = None
-  #         for k in range(len(W[j])):
-  #           if k != PRIMITIVES.index('none'):
-  #             if k_best is None or W[j][k] > W[j][k_best]:
-  #               k_best = k
-  #         gene.append((PRIMITIVES[k_best], j))
-  #       start = end
-  #       n += 1
-  #     return gene
-
-  #   gene_normal = _parse(F.softmax(self.alphas_normal, dim=-1).data.cpu().numpy())
-  #   gene_reduce = _parse(F.softmax(self.alphas_reduce, dim=-1).data.cpu().numpy())
-
-  #   concat = range(2+self._steps-self._multiplier, self._steps+2)
-  #   genotype = Genotype(
-  #     normal=gene_normal, normal_concat=concat,
-  #     reduce=gene_reduce, reduce_concat=concat
-  #   )
-  #   return genotype
-
