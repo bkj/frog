@@ -182,6 +182,3 @@ for epoch in range(args.epochs):
   torch.save(model.state_dict(), os.path.join(args.outpath, 'weights.pt'))
   torch.save(arch.normal, os.path.join(args.outpath, 'normal_arch_e%d.pt' % epoch))
   torch.save(arch.reduce, os.path.join(args.outpath, 'reduce_arch_e%d.pt' % epoch))
-
-
-
