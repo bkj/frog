@@ -24,7 +24,7 @@ class MixedOp(nn.Module):
       self._ops.append(op)
       
   def forward(self, x, weights):
-    return sum(w * op(x) for w, op in zip(weights, self._ops))
+    return sum(w * op(x) for w, op in zip(weights, self._ops)) # Faster inplace?
 
 
 class DARTSearchCell(nn.Module):
@@ -58,7 +58,7 @@ class DARTSearchCell(nn.Module):
     ]
     offset = 0
     for step in range(self.steps):
-      s = sum(self._ops[offset+j](h, weights[offset+j]) for j, h in enumerate(states))
+      s = sum(self._ops[offset+j](h, weights[offset+j]) for j, h in enumerate(states)) # Faster inplace?
       offset += len(states)
       states.append(s)
     
