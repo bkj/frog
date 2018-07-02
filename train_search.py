@@ -49,8 +49,8 @@ def parse_args():
   
   parser.add_argument('--num-classes', type=int, default=10)
   parser.add_argument('--in-channels', type=int, default=16)
-  parser.add_argument('--layers', type=int, default=8)
-  parser.add_argument('--steps', type=int, default=4)
+  parser.add_argument('--num-layers', type=int, default=8)
+  parser.add_argument('--num-nodes', type=int, default=4)
   
   parser.add_argument('--arch-lr', type=float, default=3e-4)
   parser.add_argument('--arch-weight-decay', type=float, default=1e-3)
@@ -67,79 +67,85 @@ num_ops = len(PRIMITIVES)
 
 set_seeds(args.seed)
 
-# train_transform, valid_transform = utils._data_transforms_cifar10(cutout=False)
-# train_data = datasets.CIFAR10(root='./data', train=True, download=False, transform=train_transform)
-# valid_data = datasets.CIFAR10(root='./data', train=False, download=False, transform=valid_transform)
+train_transform, valid_transform = utils._data_transforms_cifar10(cutout=False)
+train_data = datasets.CIFAR10(root='./data', train=True, download=False, transform=train_transform)
+valid_data = datasets.CIFAR10(root='./data', train=False, download=False, transform=valid_transform)
 
-# # Is this necessary?
-# train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5)
+# Is this necessary?
+train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5)
 
-# class ZipDataloader:
-#   def __init__(self, dataloaders):
-#     self.dataloaders = dataloaders
+class ZipDataloader:
+  def __init__(self, dataloaders):
+    self.dataloaders = dataloaders
   
-#   def __len__(self):
-#     return max([len(d) for d in self.dataloaders])
+  def __len__(self):
+    return max([len(d) for d in self.dataloaders])
   
-#   def __iter__(self):
-#     counter = 0
-#     iters = [iter(d) for d in self.dataloaders]
-#     while counter < len(self):
-#       yield tuple(zip(*[next(it) for it in iters]))
-#       counter += 1
+  def __iter__(self):
+    counter = 0
+    iters = [iter(d) for d in self.dataloaders]
+    while counter < len(self):
+      yield tuple(zip(*[next(it) for it in iters]))
+      counter += 1
 
-# dataloaders = {
-#   "train"  : ZipDataloader([
-#     torch.utils.data.DataLoader(
-#       dataset=train_data,
-#       batch_size=args.batch_size,
-#       sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
-#       pin_memory=False,
-#       num_workers=4,
-#     ),
-#     torch.utils.data.DataLoader(
-#       dataset=train_data,
-#       batch_size=args.batch_size,
-#       sampler=torch.utils.data.sampler.SubsetRandomSampler(search_indices),
-#       pin_memory=False,
-#       num_workers=4,
-#     )
-#   ]),
-#   "valid"  : torch.utils.data.DataLoader(
-#     dataset=valid_data,
-#     batch_size=args.batch_size,
-#     shuffle=False,
-#     pin_memory=True,
-#     num_workers=2,
-#   )
-# }
+dataloaders = {
+  "train"  : ZipDataloader([
+    torch.utils.data.DataLoader(
+      dataset=train_data,
+      batch_size=args.batch_size,
+      sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
+      pin_memory=False,
+      num_workers=0,
+    ),
+    torch.utils.data.DataLoader(
+      dataset=train_data,
+      batch_size=args.batch_size,
+      sampler=torch.utils.data.sampler.SubsetRandomSampler(search_indices),
+      pin_memory=False,
+      num_workers=0,
+    )
+  ]),
+  "valid"  : torch.utils.data.DataLoader(
+    dataset=valid_data,
+    batch_size=args.batch_size,
+    shuffle=False,
+    pin_memory=True,
+    num_workers=0,
+  )
+}
 
 # --
 # Define model
 
 class Architecture(BaseNet):
-  def __init__(self, steps, num_ops, num_prev=2, scale=1e-3):
+  def __init__(self, num_nodes, num_ops, num_prev=2, scale=1e-3):
     super().__init__(loss_fn=F.cross_entropy)
     
-    self.steps    = steps
-    self.num_ops  = num_ops
-    self.num_prev = num_prev
+    self.num_nodes = num_nodes
+    self.num_ops   = num_ops
+    self.num_prev  = num_prev
     
-    # ends = (np.arange(steps) + 2).cumsum()
+    # ends = (np.arange(num_nodes) + 2).cumsum()
     # self._breaks = np.column_stack([
     #   np.hstack([[0], ends[:-1]]),
     #   ends,
     # ])
     
-    n_edges     = num_prev * steps + sum(range(steps)) # Connections to inputs + connections to earlier steps
+    n_edges     = num_prev * num_nodes + sum(range(num_nodes)) # Connections to inputs + connections to earlier num_nodes
     self.normal = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
     self.reduce = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
   
+  def get_weights(self):
+    # !! Could do other logic in here
+    normal_weights = F.softmax(self.normal, dim=-1)
+    reduce_weights = F.softmax(self.reduce, dim=-1)
+    return normal_weights, reduce_weights
+  
   def __repr__(self):
-    return 'Architecture(steps=%d | num_ops=%d)' % (self.steps, self.num_ops)
+    return 'Architecture(num_nodes=%d | num_ops=%d)' % (self.num_nodes, self.num_ops)
 
-# cuda = torch.device('cuda')
-arch = Architecture(steps=args.steps, num_ops=num_ops)#.to(cuda)
+cuda = torch.device('cuda')
+arch = Architecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
 arch.init_optimizer(
   opt=torch.optim.Adam,
   params=arch.parameters(),
@@ -153,41 +159,40 @@ model = DARTSearchNetwork(
   arch=arch,
   in_channels=args.in_channels,
   num_classes=args.num_classes,
-  layers=args.layers,
-  steps=args.steps,
-)#.to(cuda)
+  num_layers=args.num_layers,
+  num_nodes=args.num_nodes,
+).to(cuda)
 model.verbose = True
-
 print(model)
 
-# model.init_optimizer(
-#   opt=torch.optim.SGD,
-#   params=model.parameters(),
-#   hp_scheduler={
-#     "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
-#   },
-#   momentum=args.momentum,
-#   weight_decay=args.weight_decay,
-#   clip_grad_norm=5.0,
-# )
+model.init_optimizer(
+  opt=torch.optim.SGD,
+  params=model.parameters(),
+  hp_scheduler={
+    "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
+  },
+  momentum=args.momentum,
+  weight_decay=args.weight_decay,
+  clip_grad_norm=5.0,
+)
 
-# # --
-# # Run
+# --
+# Run
 
-# t = time()
-# for epoch in range(args.epochs):
-#   train = model.train_epoch(dataloaders, mode='train', compute_acc=True)
-#   valid = model.eval_epoch(dataloaders, mode='valid', compute_acc=True)
+t = time()
+for epoch in range(args.epochs):
+  train = model.train_epoch(dataloaders, mode='train', compute_acc=True)
+  valid = model.eval_epoch(dataloaders, mode='valid', compute_acc=True)
   
-#   print(json.dumps({
-#     "epoch"      : int(epoch),
-#     "train_loss" : float(np.mean(train['loss'][-10:])),
-#     "train_acc"  : float(train['acc']),
-#     "valid_loss" : float(np.mean(valid['loss'])),
-#     "valid_acc"  : float(valid['acc']),
-#   }))
-#   sys.stdout.flush()
+  print(json.dumps({
+    "epoch"      : int(epoch),
+    "train_loss" : float(np.mean(train['loss'][-10:])),
+    "train_acc"  : float(train['acc']),
+    "valid_loss" : float(np.mean(valid['loss'])),
+    "valid_acc"  : float(valid['acc']),
+  }))
+  sys.stdout.flush()
   
-#   torch.save(model.state_dict(), os.path.join(args.outpath, 'weights.pt'))
-#   torch.save(arch.normal, os.path.join(args.outpath, 'normal_arch_e%d.pt' % epoch))
-#   torch.save(arch.reduce, os.path.join(args.outpath, 'reduce_arch_e%d.pt' % epoch))
+  torch.save(model.state_dict(), os.path.join(args.outpath, 'weights.pt'))
+  torch.save(arch.normal, os.path.join(args.outpath, 'normal_arch_e%d.pt' % epoch))
+  torch.save(arch.reduce, os.path.join(args.outpath, 'reduce_arch_e%d.pt' % epoch))

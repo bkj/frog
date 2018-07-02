@@ -43,6 +43,9 @@ class ReLUConvBN(nn.Module):
 
   def forward(self, x):
     return self.op(x)
+  
+  def __repr__(self):
+    return self.op.__repr__()
 
 class DilConv(nn.Module):
     
@@ -57,6 +60,9 @@ class DilConv(nn.Module):
 
   def forward(self, x):
     return self.op(x)
+
+  def __repr__(self):
+    return self.op.__repr__()
 
 
 class SepConv(nn.Module):
@@ -77,6 +83,9 @@ class SepConv(nn.Module):
   def forward(self, x):
     return self.op(x)
 
+  def __repr__(self):
+    return self.op.__repr__()
+
 
 class Identity(nn.Module):
 
@@ -85,6 +94,9 @@ class Identity(nn.Module):
 
   def forward(self, x):
     return x
+
+  def __repr__(self):
+    return "Identity()"
 
 
 class Zero(nn.Module):
@@ -98,16 +110,19 @@ class Zero(nn.Module):
       return x.mul(0.)
     return x[:,:,::self.stride,::self.stride].mul(0.)
 
+  def __repr__(self):
+    return "Zero(stride=%d)" % stride
+
 
 class FactorizedReduce(nn.Module):
 
   def __init__(self, C_in, C_out, affine=True):
     super().__init__()
     assert C_out % 2 == 0
-    self.relu = nn.ReLU(inplace=False)
+    self.relu   = nn.ReLU(inplace=False)
     self.conv_1 = nn.Conv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False)
     self.conv_2 = nn.Conv2d(C_in, C_out // 2, 1, stride=2, padding=0, bias=False) 
-    self.bn = nn.BatchNorm2d(C_out, affine=affine)
+    self.bn     = nn.BatchNorm2d(C_out, affine=affine)
 
   def forward(self, x):
     x = self.relu(x)

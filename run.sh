@@ -18,3 +18,10 @@ mkdir -p results/search/0
 CUDA_VISIBLE_DEVICES=4 python train_search.py --outpath results/search/1 |\
     tee results/search/1/log.jl
 
+# --
+
+rm -rf results/search-mnist/0
+mkdir -p results/search-mnist/0
+
+CUDA_VISIBLE_DEVICES=1 python train_search_mnist.py --outpath results/search-mnist/0 |\
+    tee results/search-mnist/0/log.jl

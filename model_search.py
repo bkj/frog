@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 """
-  model_search.py
+    model_search.py
 """
 
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,54 +13,88 @@ from basenet import BaseNet
 
 from operations import *
 
-class MixedOp(nn.Module):
-  def __init__(self, num_channels, stride):
+class DARTEdge(nn.Module):
+  def __init__(self, id, num_channels, stride, primitives=PRIMITIVES, simple_repr=True):
     super().__init__()
     
-    self._ops = nn.ModuleList()
-    for primitive in PRIMITIVES:
+    self.name = 'edge(%d)' % id
+    
+    self._primitives  = primitives
+    self._simple_repr = simple_repr
+    
+    for primitive in primitives:
       op = OPS[primitive](num_channels, stride, False)
       if 'pool' in primitive:
         op = nn.Sequential(op, nn.BatchNorm2d(num_channels, affine=False))
-      self._ops.append(op)
-      
+      self.add_module(primitive, op)
+  
   def forward(self, x, weights):
-    return sum(w * op(x) for w, op in zip(weights, self._ops)) # Faster inplace?
+    return sum(w * getattr(self, p)(x) for w, p in zip(weights, self._primitives)) # Slower?
+  
+  def __repr__(self):
+    if self._simple_repr:
+      return 'DARTEdge(%s)' % str(self._primitives)
+    else:
+      return super().__repr__()
+
+
+class DARTNode(nn.Module):
+  def __init__(self, id):
+    super().__init__()
+    
+    self.name = 'node(%d)' % id
+    self.meta = []
 
 
 class DARTSearchCell(nn.Module):
   def __init__(self, layer_infos):
     super().__init__()
+    self.meta = []
     
     assert len(layer_infos) == 3
     layer_minus_2, layer_minus_1, layer = layer_infos
     
-    self.reduction       = layer['reduction']
-    self.steps           = layer['steps']
-    self.cat_last        = layer['cat_last']
+    self.reduction = layer['reduction']
+    self.num_nodes = layer['num_nodes']
+    self.cat_last  = layer['cat_last']
     
     if layer_minus_1['reduction']:
-      self.preprocess0 = FactorizedReduce(layer_minus_2['output_channels'], layer['op_channels'], affine=False)
+      self.prep0 = FactorizedReduce(layer_minus_2['output_channels'], layer['op_channels'], affine=False)
     else:
-      self.preprocess0 = ReLUConvBN(layer_minus_2['output_channels'], layer['op_channels'], 1, 1, 0, affine=False)
+      self.prep0 = ReLUConvBN(layer_minus_2['output_channels'], layer['op_channels'], 1, 1, 0, affine=False)
     
-    self.preprocess1 = ReLUConvBN(layer_minus_1['output_channels'], layer['op_channels'], 1, 1, 0, affine=False)
+    self.prep1 = ReLUConvBN(layer_minus_1['output_channels'], layer['op_channels'], 1, 1, 0, affine=False)
     
-    self._ops = nn.ModuleList()
-    for step in range(self.steps):
-      for idx in range(step + 2):
-        stride = 2 if self.reduction and idx < 2 else 1
-        self._ops.append(MixedOp(num_channels=layer['op_channels'], stride=stride))
+    weight_offset = 0
+    for node_idx in range(self.num_nodes):
+      node = DARTNode(id=node_idx)
+      for state_offset, edge_idx in enumerate(range(-2, node_idx)):
+        
+        stride = 2 if self.reduction and edge_idx < 0 else 1
+        edge = DARTEdge(id=edge_idx, num_channels=layer['op_channels'], stride=stride)
+        
+        node.add_module(edge.name, edge)
+        node.meta.append({
+          "edge_name"     : edge.name,
+          "weight_offset" : weight_offset,
+          "state_offset"  : state_offset,
+        })
+        
+        weight_offset += 1
+      
+      self.add_module(node.name, node)
+      self.meta.append({
+        "node_name" : node.name
+      })
   
-  def forward(self, s0, s1, weights):
+  def forward(self, states, weights):
     states = [
-      self.preprocess0(s0),
-      self.preprocess1(s1),
+      self.prep0(states[0]),
+      self.prep1(states[1]),
     ]
-    offset = 0
-    for step in range(self.steps):
-      s = sum(self._ops[offset+j](h, weights[offset+j]) for j, h in enumerate(states)) # Faster inplace?
-      offset += len(states)
+    for node_meta in self.meta:
+      node = getattr(self, node_meta['node_name'])
+      s = sum(getattr(node, edge_meta['edge_name'])(states[edge_meta['state_offset']], weights[edge_meta['weight_offset']]) for edge_meta in node.meta)
       states.append(s)
     
     out = states[-self.cat_last:]
@@ -68,14 +103,12 @@ class DARTSearchCell(nn.Module):
 
 
 class DARTSearchNetwork(BaseNet):
-  def __init__(self, arch, in_channels, num_classes, layers, steps=4, cat_last=4, stem_multiplier=3):
+  def __init__(self, arch, in_channels, num_classes, num_layers, num_nodes=4, cat_last=4, stem_multiplier=3, num_inputs=2):
     super().__init__(loss_fn=F.cross_entropy)
     
-    reduction_idx = [layers//3, 2 * layers//3]
+    reduction_idxs = [num_layers // 3, 2 * num_layers // 3]
     
     self._arch = arch
-    
-    # Define architecture
     
     self.stem = nn.Sequential(
       nn.Conv2d(3, stem_multiplier * in_channels, 3, padding=1, bias=False),
@@ -83,40 +116,40 @@ class DARTSearchNetwork(BaseNet):
     )
     
     self.layer_infos = [
-      {"steps" : steps, "cat_last" : 1, "reduction" : False, "op_channels" : stem_multiplier * in_channels, "output_channels" : stem_multiplier * in_channels}, # Stem info
-      {"steps" : steps, "cat_last" : 1, "reduction" : False, "op_channels" : stem_multiplier * in_channels, "output_channels" : stem_multiplier * in_channels}, # Stem info
-    ]
+      {"num_nodes" : num_nodes, "cat_last" : 1, "reduction" : False, "op_channels" : stem_multiplier * in_channels, "output_channels" : stem_multiplier * in_channels}, # Stem info
+    ] * num_inputs
     self.cells = []
     op_channels = in_channels
-    for layer_idx in range(layers):
-      reduction = layer_idx in reduction_idx
+    for layer_idx in range(num_layers):
+      reduction = layer_idx in reduction_idxs
       if reduction:
         op_channels *= 2
       
       self.layer_infos.append({
-        "steps"           : steps,
+        "num_nodes"       : num_nodes,
         "cat_last"        : cat_last,
         "reduction"       : reduction,
         "op_channels"     : op_channels,
         "output_channels" : op_channels * cat_last,
       })
       
-      self.cells.append(DARTSearchCell(layer_infos=self.layer_infos[-3:]))
+      self.cells.append(DARTSearchCell(layer_infos=self.layer_infos[-(num_inputs+1):]))
     
     self.cells          = nn.ModuleList(self.cells)
     self.global_pooling = nn.AdaptiveAvgPool2d(1)
     self.classifier     = nn.Linear(self.layer_infos[-1]['output_channels'], num_classes)
+    
+    self.num_inputs = num_inputs
   
-  def forward(self, input):
-    s0 = s1 = self.stem(input)
+  def forward(self, x):
+    normal_weights, reduce_weights = self._arch.get_weights()
     
-    normal_weights = F.softmax(self._arch.normal, dim=-1)
-    reduce_weights = F.softmax(self._arch.reduce, dim=-1)
-    
+    x = self.stem(x)
+    states = [x] * self.num_inputs
     for cell in self.cells:
-      s0, s1 = s1, cell(s0, s1, normal_weights if not cell.reduction else reduce_weights)
+      states = states[1:] + [cell(states, normal_weights if not cell.reduction else reduce_weights)]
     
-    out = self.global_pooling(s1)
+    out = self.global_pooling(states[-1])
     out = out.view(out.size(0),-1)
     out = self.classifier(out)
     return out
@@ -125,4 +158,6 @@ class DARTSearchNetwork(BaseNet):
     data_train, data_search = data
     target_train, target_search = target
     self._arch.train_batch(data_search, target_search, forward=self.forward)
-    return super().train_batch(data_train, target_train, metric_fns=metric_fns)
+    loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
+    print(loss, file=sys.stderr)
+    return loss, metrics
