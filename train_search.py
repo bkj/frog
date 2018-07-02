@@ -24,7 +24,7 @@ from torchvision import datasets
 
 import utils
 from operations import PRIMITIVES
-from model_search import DARTSearchNetwork, DARTArchitecture
+from model_search import DARTSearchNetwork, DARTTrainNetwork, DARTArchitecture
 
 from basenet import BaseNet, Metrics, HPSchedule
 from basenet.helpers import set_seeds
@@ -53,6 +53,7 @@ def parse_args():
   parser.add_argument('--lr-min', type=float, default=0.001)
   parser.add_argument('--momentum', type=float, default=0.9)
   parser.add_argument('--weight-decay', type=float, default=3e-4)
+  parser.add_argument('--cutout-length', type=int, default=0)
   
   parser.add_argument('--op-channels', type=int, default=16)
   parser.add_argument('--num-layers', type=int, default=8)
@@ -83,46 +84,45 @@ elif args.dataset == 'fashion_mnist':
   num_classes = 10
 
 train_transform, valid_transform = btransforms.DatasetPipeline(dataset=args.dataset)
-# if args.cutout:
-#   cutout = btransforms.Cutout(cut_h=args.cutout_length, cut_w=args.cutout_length)
-#   train_transform.transforms.append(cutout)
+if args.cutout_length > 0:
+  cutout = btransforms.Cutout(cut_h=args.cutout_length, cut_w=args.cutout_length)
+  train_transform.transforms.append(cutout)
 
 train_data = dataset_fn(root='./data', train=True, download=False, transform=train_transform)
 valid_data = dataset_fn(root='./data', train=False, download=False, transform=valid_transform)
 
-
-# Is this necessary?
-train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5)
-
-dataloaders = {
-  "train"  : utils.ZipDataloader([
-    torch.utils.data.DataLoader(
-      dataset=train_data,
-      batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
-      pin_memory=False,
-      num_workers=0,
-    ),
-    torch.utils.data.DataLoader(
-      dataset=train_data,
-      batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(search_indices),
-      pin_memory=False,
-      num_workers=0,
-    )
-  ]),
-  "valid"  : torch.utils.data.DataLoader(
-    dataset=valid_data,
-    batch_size=args.batch_size,
-    shuffle=False,
-    pin_memory=True,
-    num_workers=0,
-  )
-}
-
 cuda = torch.device('cuda')
 
 if not args.genotype:
+  # Is this necessary?
+  train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5)
+  
+  dataloaders = {
+    "train"  : utils.ZipDataloader([
+      torch.utils.data.DataLoader(
+        dataset=train_data,
+        batch_size=args.batch_size,
+        sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
+        pin_memory=False,
+        num_workers=0,
+      ),
+      torch.utils.data.DataLoader(
+        dataset=train_data,
+        batch_size=args.batch_size,
+        sampler=torch.utils.data.sampler.SubsetRandomSampler(search_indices),
+        pin_memory=False,
+        num_workers=0,
+      )
+    ]),
+    "valid"  : torch.utils.data.DataLoader(
+      dataset=valid_data,
+      batch_size=args.batch_size,
+      shuffle=False,
+      pin_memory=True,
+      num_workers=0,
+    )
+  }
+  
   arch = DARTArchitecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
   arch.init_optimizer(
     opt=torch.optim.Adam,
@@ -141,6 +141,23 @@ if not args.genotype:
     num_nodes=args.num_nodes,
   ).to(cuda)
 else:
+  dataloaders = {
+    "train"  : torch.utils.data.DataLoader(
+      dataset=train_data,
+      batch_size=args.batch_size,
+      shuffle=True,
+      pin_memory=False,
+      num_workers=0,
+    ),
+    "valid"  : torch.utils.data.DataLoader(
+      dataset=valid_data,
+      batch_size=args.batch_size,
+      shuffle=False,
+      pin_memory=True,
+      num_workers=0,
+    )
+  }
+  
   # Check that `num_nodes` and `genotype` sizes work
   model = DARTTrainNetwork(
     genotype=np.load(args.genotype),
@@ -149,7 +166,7 @@ else:
     op_channels=args.op_channels,
     num_layers=args.num_layers,
     num_nodes=args.num_nodes,
-  )
+  ).to(cuda)
 
 model.verbose = True
 print(model, file=sys.stderr)
@@ -168,6 +185,7 @@ model.init_optimizer(
 # --
 # Run
 
+print('ok')
 t = time()
 for epoch in range(args.epochs):
   train = model.train_epoch(dataloaders, mode='train', compute_acc=True)
@@ -182,6 +200,4 @@ for epoch in range(args.epochs):
   }))
   sys.stdout.flush()
   
-  torch.save(model.state_dict(), os.path.join(args.outpath, 'weights.pt'))
-  torch.save(arch.normal, os.path.join(args.outpath, 'normal_arch_e%d.pt' % epoch))
-  torch.save(arch.reduce, os.path.join(args.outpath, 'reduce_arch_e%d.pt' % epoch))
+  model.checkpoint(args.outpath)

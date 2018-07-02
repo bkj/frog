@@ -4,6 +4,7 @@
     model_search.py
 """
 
+import os
 import sys
 import numpy as np
 
@@ -74,20 +75,20 @@ class DARTEdge(nn.Module):
     
     return sum(w * getattr(self, p)(x) for w, p in zip(weights, self._primitives)) # Slower?
   
-  # def fix_weights(self, weights):
-  #   # !! Untested
-  #   assert not self._fixed, 'DARTEdge: already fixed'
-  #   self._fixed = True
-  #   tmp_primitives = []
-  #   for w, p in zip(weights, self._primitives):
-  #     if w > 0:
-  #       tmp_primitives.append(p)
-  #       tmp_weights.append(float(w))
-  #     else:
-  #       delattr(t, p)
+  def fix_weights(self, weights):
+    # !! Untested
+    assert not self._fixed, 'DARTEdge: already fixed'
+    self._fixed = True
+    tmp_primitives, tmp_weights = [], []
+    for w, p in zip(weights, self._primitives):
+      if w > 0:
+        tmp_primitives.append(p)
+        tmp_weights.append(float(w))
+      else:
+        delattr(self, p)
     
-  #   self._primitives = tmp_primitives
-  #   self._weights    = tmp_weights
+    self._primitives = tmp_primitives
+    self._weights    = tmp_weights
   
   def __repr__(self):
     if self._simple_repr:
@@ -183,9 +184,15 @@ class DARTSearchCell(nn.Module):
           getattr(node, edge_meta['edge_name']).fix_weights(w)
           tmp_node_meta.append(edge_meta)
         else:
-          delattr(edge_meta['edge_name'])
+          delattr(node, edge_meta['edge_name'])
         
         node.meta = tmp_node_meta
+  
+  def __repr__(self):
+    if self.reduction:
+      return 'Reduce' + super().__repr__()
+    else:
+      return super().__repr__()
 
 
 class _DARTNetwork(BaseNet):
@@ -253,11 +260,19 @@ class DARTSearchNetwork(_DARTNetwork):
     target_train, target_search = target
     self._arch.train_batch(data_search, target_search, forward=self.forward)
     return super().train_batch(data_train, target_train, metric_fns=metric_fns)
+    
+  def checkpoint(self, outpath):
+    torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))
+    torch.save(self._arch.normal, os.path.join(outpath, 'normal_arch_e%d.pt' % epoch))
+    torch.save(self._arch.reduce, os.path.join(outpath, 'reduce_arch_e%d.pt' % epoch))
 
 
 class DARTTrainNetwork(_DARTNetwork):
-  def __init__(self, fixed_weights, *args, **kwargs):
+  def __init__(self, genotype, *args, **kwargs):
     super().__init__(*args, **kwargs)
     self._fixed = True
     for cell in self.cells:
-      cell.fix_weights(fixed_weights)
+      cell.fix_weights(genotype)
+    
+  def checkpoint(self, outpath):
+    torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))

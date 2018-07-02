@@ -30,7 +30,19 @@ CUDA_VISIBLE_DEVICES=1 python train_search.py \
     tee results/search/mnist/0/log.jl
 
 python sample-arch.py \
-    --normal-path results/search/mnist/0/normal_arch_e1.pt \
-    --reduce-path results/search/mnist/0/reduce_arch_e1.pt \
-    --outpath results/search/mnist/0/genotype.pkl \
-    --matrix
+    --normal-path results/search/mnist/0/normal_arch_e12.pt \
+    --reduce-path results/search/mnist/0/reduce_arch_e12.pt \
+    --outpath results/search/mnist/0/genotype.pkl
+
+python sample-arch.py \
+    --normal-path results/search/mnist/0/normal_arch_e12.pt \
+    --reduce-path results/search/mnist/0/reduce_arch_e12.pt \
+    --outpath results/search/mnist/0/genotype.npy \
+    --as-matrix
+
+CUDA_VISIBLE_DEVICES=1 python train_search.py \
+    --outpath scratch \
+    --dataset fashion_mnist \
+    --genotype results/search/mnist/0/genotype.npy \
+    --op-channels 4 \
+    --num-layers 4
