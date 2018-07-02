@@ -23,7 +23,7 @@ import torch.utils.data
 from torchvision import datasets
 
 import utils
-from genotypes import PRIMITIVES
+from operations import PRIMITIVES
 from model_search import DARTSearchNetwork
 
 from basenet import BaseNet, Metrics, HPSchedule

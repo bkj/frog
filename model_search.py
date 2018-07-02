@@ -11,7 +11,6 @@ import torch.nn.functional as F
 from basenet import BaseNet
 
 from operations import *
-from genotypes import PRIMITIVES
 
 class MixedOp(nn.Module):
   def __init__(self, num_channels, stride):
@@ -38,21 +37,19 @@ class DARTSearchCell(nn.Module):
     self.reduction       = layer['reduction']
     self.steps           = layer['steps']
     self.cat_last        = layer['cat_last']
-    self.op_channels     = layer['op_channels']
-    self.output_channels = self.op_channels * self.cat_last
     
     if layer_minus_1['reduction']:
-      self.preprocess0 = FactorizedReduce(layer_minus_2['cat_last'] * layer_minus_2['op_channels'], self.op_channels, affine=False)
+      self.preprocess0 = FactorizedReduce(layer_minus_2['output_channels'], layer['op_channels'], affine=False)
     else:
-      self.preprocess0 = ReLUConvBN(layer_minus_2['cat_last'] * layer_minus_2['op_channels'], self.op_channels, 1, 1, 0, affine=False)
+      self.preprocess0 = ReLUConvBN(layer_minus_2['output_channels'], layer['op_channels'], 1, 1, 0, affine=False)
     
-    self.preprocess1 = ReLUConvBN(layer_minus_1['cat_last'] * layer_minus_1['op_channels'], self.op_channels, 1, 1, 0, affine=False)
+    self.preprocess1 = ReLUConvBN(layer_minus_1['output_channels'], layer['op_channels'], 1, 1, 0, affine=False)
     
     self._ops = nn.ModuleList()
-    for i in range(self.steps):
-      for idx in range(i+2):
+    for step in range(self.steps):
+      for idx in range(step + 2):
         stride = 2 if self.reduction and idx < 2 else 1
-        self._ops.append(MixedOp(num_channels=self.op_channels, stride=stride))
+        self._ops.append(MixedOp(num_channels=layer['op_channels'], stride=stride))
   
   def forward(self, s0, s1, weights):
     states = [
@@ -60,12 +57,14 @@ class DARTSearchCell(nn.Module):
       self.preprocess1(s1),
     ]
     offset = 0
-    for _ in range(self.steps):
-      s = sum(self.ops[offset+j](h, weights[offset+j]) for j, h in enumerate(states))
+    for step in range(self.steps):
+      s = sum(self._ops[offset+j](h, weights[offset+j]) for j, h in enumerate(states))
       offset += len(states)
       states.append(s)
-      
-    return torch.cat(states[-self.cat_last:], dim=1)
+    
+    out = states[-self.cat_last:]
+    out = torch.cat(out, dim=1)
+    return out
 
 
 class DARTSearchNetwork(BaseNet):
@@ -74,12 +73,9 @@ class DARTSearchNetwork(BaseNet):
     
     reduction_idx = [layers//3, 2 * layers//3]
     
-    self._arch        = arch
-    self._num_classes = num_classes
-    self._layers      = layers
+    self._arch = arch
     
-    self._steps     = steps
-    self._cat_last  = cat_last
+    # Define architecture
     
     self.stem = nn.Sequential(
       nn.Conv2d(3, stem_multiplier * in_channels, 3, padding=1, bias=False),
@@ -87,8 +83,8 @@ class DARTSearchNetwork(BaseNet):
     )
     
     self.layer_infos = [
-      {"steps" : steps, "cat_last" : 1, "reduction" : False, "op_channels" : stem_multiplier * in_channels}, # Stem info
-      {"steps" : steps, "cat_last" : 1, "reduction" : False, "op_channels" : stem_multiplier * in_channels}, # Stem info
+      {"steps" : steps, "cat_last" : 1, "reduction" : False, "op_channels" : stem_multiplier * in_channels, "output_channels" : stem_multiplier * in_channels}, # Stem info
+      {"steps" : steps, "cat_last" : 1, "reduction" : False, "op_channels" : stem_multiplier * in_channels, "output_channels" : stem_multiplier * in_channels}, # Stem info
     ]
     self.cells = []
     op_channels = in_channels
@@ -98,17 +94,18 @@ class DARTSearchNetwork(BaseNet):
         op_channels *= 2
       
       self.layer_infos.append({
-        "steps"       : steps,
-        "cat_last"    : cat_last,
-        "reduction"   : reduction,
-        "op_channels" : op_channels,
+        "steps"           : steps,
+        "cat_last"        : cat_last,
+        "reduction"       : reduction,
+        "op_channels"     : op_channels,
+        "output_channels" : op_channels * cat_last,
       })
       
       self.cells.append(DARTSearchCell(layer_infos=self.layer_infos[-3:]))
     
     self.cells          = nn.ModuleList(self.cells)
     self.global_pooling = nn.AdaptiveAvgPool2d(1)
-    self.classifier     = nn.Linear(self.cells[-1].output_channels, num_classes)
+    self.classifier     = nn.Linear(self.layer_infos[-1]['output_channels'], num_classes)
   
   def forward(self, input):
     s0 = s1 = self.stem(input)
