@@ -48,7 +48,7 @@ def parse_args():
   parser.add_argument('--weight-decay', type=float, default=3e-4)
   
   parser.add_argument('--num-classes', type=int, default=10)
-  parser.add_argument('--init-channels', type=int, default=16)
+  parser.add_argument('--in-channels', type=int, default=16)
   parser.add_argument('--layers', type=int, default=8)
   parser.add_argument('--steps', type=int, default=4)
   
@@ -151,10 +151,9 @@ arch.init_optimizer(
 
 model = DARTSearchNetwork(
   arch=arch,
-  num_channels=args.init_channels,
+  in_channels=args.in_channels,
   num_classes=args.num_classes,
-  # layers=args.layers,
-  layers=4,
+  layers=args.layers,
   steps=args.steps,
 )#.to(cuda)
 model.verbose = True
