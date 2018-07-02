@@ -118,13 +118,20 @@ dataloaders = {
 # Define model
 
 class Architecture(BaseNet):
-  def __init__(self, steps, num_ops, scale=1e-3):
+  def __init__(self, steps, num_ops, num_prev=2, scale=1e-3):
     super().__init__(loss_fn=F.cross_entropy)
     
-    self.steps   = steps
-    self.num_ops = num_ops
+    self.steps    = steps
+    self.num_ops  = num_ops
+    self.num_prev = num_prev
     
-    n_edges     = 2 * steps + sum(range(steps)) # Connections to inputs + connections to earlier steps
+    # ends = (np.arange(steps) + 2).cumsum()
+    # self._breaks = np.column_stack([
+    #   np.hstack([[0], ends[:-1]]),
+    #   ends,
+    # ])
+    
+    n_edges     = num_prev * steps + sum(range(steps)) # Connections to inputs + connections to earlier steps
     self.normal = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
     self.reduce = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
   

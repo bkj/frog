@@ -36,7 +36,6 @@ def parse_args():
     parser.add_argument('--steps', type=int, default=4)
     parser.add_argument('--multiplier', type=int, default=4)
     
-    
     return parser.parse_args()
 
 
@@ -46,11 +45,11 @@ def parse_args():
 def parse_genotype(weights, steps):
     gene = []
     start = 0
+    weights = weights[:,1:] # Drop nones
     for i in range(steps):
         end = start + 2 + i
         W = weights[start:end].copy()
-        W = W[:,1:] # Drop nones
-        top_edges = W.max(axis=-1).argsort()[::-1][:2] # 
+        top_edges = W.max(axis=-1).argsort()[::-1][:2]
         for edge in top_edges:
             gene.append((PRIMITIVES[W[edge].argmax() + 1], edge))
         
