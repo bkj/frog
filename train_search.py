@@ -44,6 +44,8 @@ def parse_args():
   parser = argparse.ArgumentParser("cifar")
   parser.add_argument('--outpath', type=str, default="results/search/0")
   parser.add_argument('--dataset', type=str, default='cifar10')
+  parser.add_argument('--genotype', type=str)
+  
   parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
   parser.add_argument('--batch-size', type=int, default=64, help='batch size')
   
@@ -119,24 +121,36 @@ dataloaders = {
 }
 
 cuda = torch.device('cuda')
-arch = DARTArchitecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
-arch.init_optimizer(
-  opt=torch.optim.Adam,
-  params=arch.parameters(),
-  lr=args.arch_lr,
-  betas=(0.5, 0.999),
-  weight_decay=args.arch_weight_decay,
-  clip_grad_norm=10.
-)
 
-model = DARTSearchNetwork(
-  arch=arch,
-  in_channels=in_channels,
-  num_classes=num_classes,
-  op_channels=args.op_channels,
-  num_layers=args.num_layers,
-  num_nodes=args.num_nodes,
-).to(cuda)
+if not args.genotype:
+  arch = DARTArchitecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
+  arch.init_optimizer(
+    opt=torch.optim.Adam,
+    params=arch.parameters(),
+    lr=args.arch_lr,
+    betas=(0.5, 0.999),
+    weight_decay=args.arch_weight_decay,
+    clip_grad_norm=10.
+  )
+  model = DARTSearchNetwork(
+    arch=arch,
+    in_channels=in_channels,
+    num_classes=num_classes,
+    op_channels=args.op_channels,
+    num_layers=args.num_layers,
+    num_nodes=args.num_nodes,
+  ).to(cuda)
+else:
+  # Check that `num_nodes` and `genotype` sizes work
+  model = DARTTrainNetwork(
+    genotype=np.load(args.genotype),
+    in_channels=in_channels,
+    num_classes=num_classes,
+    op_channels=args.op_channels,
+    num_layers=args.num_layers,
+    num_nodes=args.num_nodes,
+  )
+
 model.verbose = True
 print(model, file=sys.stderr)
 

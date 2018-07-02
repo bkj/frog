@@ -20,7 +20,8 @@ from torch.nn import functional as F
 from torch.autograd import Variable
 
 from basenet.helpers import to_numpy
-from genotypes import PRIMITIVES, Genotype
+from genotypes import Genotype
+from operations import PRIMITIVES
 
 np.set_printoptions(linewidth=120)
 
@@ -31,10 +32,10 @@ def parse_args():
     parser.add_argument('--normal-path', type=str, default='results/search/0/normal_arch_e49.pt')
     parser.add_argument('--reduce-path', type=str, default='results/search/0/reduce_arch_e49.pt')
     parser.add_argument('--outpath', type=str)
-    parser.add_argument('--seed', type=int, default=123)
     
-    parser.add_argument('--steps', type=int, default=4)
-    parser.add_argument('--multiplier', type=int, default=4)
+    parser.add_argument('--num-nodes', type=int, default=4)
+    parser.add_argument('--cat-last', type=int, default=4)
+    parser.add_argument('--as-matrix', action="store_true")
     
     return parser.parse_args()
 
@@ -42,11 +43,11 @@ def parse_args():
 # --
 # Helpers
 
-def parse_genotype(weights, steps):
+def parse_genotype(weights, num_nodes):
     gene = []
     start = 0
     weights = weights[:,1:] # Drop nones
-    for i in range(steps):
+    for i in range(num_nodes):
         end = start + 2 + i
         W = weights[start:end].copy()
         top_edges = W.max(axis=-1).argsort()[::-1][:2]
@@ -57,6 +58,23 @@ def parse_genotype(weights, steps):
     
     return gene
 
+
+def parse_weights(weights, num_nodes):
+    weights = weights.copy()
+    start = 0
+    for i in range(num_nodes):
+        end = start + 2 + i
+        W = weights[start:end].copy()
+        W_new = np.zeros(W.shape)
+        
+        top_edges = W[:,1:].max(axis=-1).argsort()[::-1][:2]
+        for edge in top_edges:
+            W_new[edge,W[edge,1:].argmax() + 1] = 1
+        
+        weights[start:end] = W_new
+        start = end
+    
+    return weights
 
 
 if __name__ == "__main__":
@@ -71,29 +89,24 @@ if __name__ == "__main__":
     normal_weights = to_numpy(F.softmax(normal_logits, dim=-1))
     reduce_weights = to_numpy(F.softmax(reduce_logits, dim=-1))
     
-    # from rsub import *
-    # from matplotlib import pyplot as plt
-    # _ = plt.plot(normal_weights[:,0])
-    # _ = plt.plot(reduce_weights[:,0])
-    # show_plot()
-    
-    # import seaborn as sns
-    # sns.heatmap(normal_weights)
-    # show_plot()
-
-    # import seaborn as sns
-    # sns.heatmap(reduce_weights)
-    # show_plot()
-    
-    normal_gene = parse_genotype(normal_weights, steps=args.steps)
-    reduce_gene = parse_genotype(reduce_weights, steps=args.steps)
-    
-    concat = range(2 + args.steps - args.multiplier, args.steps + 2)
-    genotype = Genotype(
-      normal=normal_gene,
-      normal_concat=concat,
-      reduce=reduce_gene,
-      reduce_concat=concat,
-    )
+    if not args.as_matrix:
+        normal_gene = parse_genotype(normal_weights, num_nodes=args.num_nodes)
+        reduce_gene = parse_genotype(reduce_weights, num_nodes=args.num_nodes)
+        
+        concat = list(range(2 + args.num_nodes - args.cat_last, args.num_nodes + 2))
+        genotype = Genotype(
+          normal=normal_gene,
+          normal_concat=concat,
+          reduce=reduce_gene,
+          reduce_concat=concat,
+        )
+        pickle.dump(genotype, open(args.outpath, 'wb'))
+    else:
+        normal_gene = parse_weights(normal_weights, num_nodes=args.num_nodes)
+        reduce_gene = parse_weights(reduce_weights, num_nodes=args.num_nodes)
+        genotype    = np.stack([normal_gene, reduce_gene])
+        np.save(args.outpath, genotype)
+        
     print('hash=%s' % md5(str(genotype).encode()).hexdigest())
-    pickle.dump(genotype, open(args.outpath, 'wb'))
+    print(genotype)
+

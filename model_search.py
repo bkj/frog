@@ -154,38 +154,45 @@ class DARTSearchCell(nn.Module):
     ]
     for node_meta in self.meta:
       node = getattr(self, node_meta['node_name'])
-      s = sum(getattr(node, edge_meta['edge_name'])(states[edge_meta['state_offset']], weights[edge_meta['weight_offset']]) for edge_meta in node.meta)
+      if not self._fixed:
+        s = sum(getattr(node, edge_meta['edge_name'])(states[edge_meta['state_offset']], weights=weights[edge_meta['weight_offset']]) for edge_meta in node.meta)
+      else:
+        s = sum(getattr(node, edge_meta['edge_name'])(states[edge_meta['state_offset']], weights=None) for edge_meta in node.meta)
+      
       states.append(s)
     
     out = states[-self.cat_last:]
     out = torch.cat(out, dim=1)
     return out
   
-  # def fix_weights(self, weights):
-  #   # !! Untested
-  #   assert not self._fixed, 'DARTEdge: already fixed'
-  #   self._fixed = True
-  #   for node_meta in self.meta:
-  #     node = getattr(self, node_meta['node_name'])
-  #     tmp_node_meta = []
-  #     for edge_meta in node.meta:
-  #       w = weights[edge_meta['weight_offset']]
-  #       if w.max() > 0:
-  #         getattr(node, edge_meta['edge_name']).fix_weights(w)
-  #         tmp_node_meta.append(edge_meta)
-  #       else:
-  #         delattr(edge_meta['edge_name'])
+  def fix_weights(self, fixed_weights):
+    # !! Untested
+    if not self.reduction:
+      fixed_weights = fixed_weights[0]
+    else:
+      fixed_weights = fixed_weights[1]
+    
+    assert not self._fixed, 'DARTEdge: already fixed'
+    self._fixed = True
+    for node_meta in self.meta:
+      node = getattr(self, node_meta['node_name'])
+      tmp_node_meta = []
+      for edge_meta in node.meta:
+        w = fixed_weights[edge_meta['weight_offset']]
+        if w.max() > 0:
+          getattr(node, edge_meta['edge_name']).fix_weights(w)
+          tmp_node_meta.append(edge_meta)
+        else:
+          delattr(edge_meta['edge_name'])
         
-  #       node.meta = tmp_node_meta
+        node.meta = tmp_node_meta
 
 
-class DARTSearchNetwork(BaseNet):
-  def __init__(self, arch, in_channels, op_channels, num_classes, num_layers, num_nodes=4, cat_last=4, stem_multiplier=3, num_inputs=2):
+class _DARTNetwork(BaseNet):
+  def __init__(self, in_channels, op_channels, num_classes, num_layers, num_nodes=4, cat_last=4, stem_multiplier=3, num_inputs=2):
     super().__init__(loss_fn=F.cross_entropy)
     
     reduction_idxs = [num_layers // 3, 2 * num_layers // 3]
-    
-    self._arch = arch
     
     self.stem = nn.Sequential(
       nn.Conv2d(in_channels, stem_multiplier * op_channels, kernel_size=3, padding=1, bias=False),
@@ -218,20 +225,39 @@ class DARTSearchNetwork(BaseNet):
     self.num_inputs = num_inputs
   
   def forward(self, x):
-    normal_weights, reduce_weights = self._arch.get_weights()
+    weights = None
+    if not self._fixed:
+      normal_weights, reduce_weights = self._arch.get_weights()
     
     x = self.stem(x)
     states = [x] * self.num_inputs
     for cell in self.cells:
-      states = states[1:] + [cell(states, normal_weights if not cell.reduction else reduce_weights)]
+      if not self._fixed:
+        weights = normal_weights if not cell.reduction else reduce_weights
+      states = states[1:] + [cell(states, weights)]
     
     out = self.global_pooling(states[-1])
     out = out.view(out.size(0),-1)
     out = self.classifier(out)
     return out
+
+
+class DARTSearchNetwork(_DARTNetwork):
+  def __init__(self, arch, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._arch = arch
+    self._fixed = False
   
   def train_batch(self, data, target, metric_fns=None):
     data_train, data_search = data
     target_train, target_search = target
     self._arch.train_batch(data_search, target_search, forward=self.forward)
     return super().train_batch(data_train, target_train, metric_fns=metric_fns)
+
+
+class DARTTrainNetwork(_DARTNetwork):
+  def __init__(self, fixed_weights, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self._fixed = True
+    for cell in self.cells:
+      cell.fix_weights(fixed_weights)
