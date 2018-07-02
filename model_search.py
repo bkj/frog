@@ -158,6 +158,4 @@ class DARTSearchNetwork(BaseNet):
     data_train, data_search = data
     target_train, target_search = target
     self._arch.train_batch(data_search, target_search, forward=self.forward)
-    loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
-    print(loss, file=sys.stderr)
-    return loss, metrics
+    return super().train_batch(data_train, target_train, metric_fns=metric_fns)
