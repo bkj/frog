@@ -67,52 +67,52 @@ num_ops = len(PRIMITIVES)
 
 set_seeds(args.seed)
 
-train_transform, valid_transform = utils._data_transforms_cifar10(cutout=False)
-train_data = datasets.CIFAR10(root='./data', train=True, download=False, transform=train_transform)
-valid_data = datasets.CIFAR10(root='./data', train=False, download=False, transform=valid_transform)
+# train_transform, valid_transform = utils._data_transforms_cifar10(cutout=False)
+# train_data = datasets.CIFAR10(root='./data', train=True, download=False, transform=train_transform)
+# valid_data = datasets.CIFAR10(root='./data', train=False, download=False, transform=valid_transform)
 
-# Is this necessary?
-train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5)
+# # Is this necessary?
+# train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5)
 
-class ZipDataloader:
-  def __init__(self, dataloaders):
-    self.dataloaders = dataloaders
+# class ZipDataloader:
+#   def __init__(self, dataloaders):
+#     self.dataloaders = dataloaders
   
-  def __len__(self):
-    return max([len(d) for d in self.dataloaders])
+#   def __len__(self):
+#     return max([len(d) for d in self.dataloaders])
   
-  def __iter__(self):
-    counter = 0
-    iters = [iter(d) for d in self.dataloaders]
-    while counter < len(self):
-      yield tuple(zip(*[next(it) for it in iters]))
-      counter += 1
+#   def __iter__(self):
+#     counter = 0
+#     iters = [iter(d) for d in self.dataloaders]
+#     while counter < len(self):
+#       yield tuple(zip(*[next(it) for it in iters]))
+#       counter += 1
 
-dataloaders = {
-  "train"  : ZipDataloader([
-    torch.utils.data.DataLoader(
-      dataset=train_data,
-      batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
-      pin_memory=False,
-      num_workers=4,
-    ),
-    torch.utils.data.DataLoader(
-      dataset=train_data,
-      batch_size=args.batch_size,
-      sampler=torch.utils.data.sampler.SubsetRandomSampler(search_indices),
-      pin_memory=False,
-      num_workers=4,
-    )
-  ]),
-  "valid"  : torch.utils.data.DataLoader(
-    dataset=valid_data,
-    batch_size=args.batch_size,
-    shuffle=False,
-    pin_memory=True,
-    num_workers=2,
-  )
-}
+# dataloaders = {
+#   "train"  : ZipDataloader([
+#     torch.utils.data.DataLoader(
+#       dataset=train_data,
+#       batch_size=args.batch_size,
+#       sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
+#       pin_memory=False,
+#       num_workers=4,
+#     ),
+#     torch.utils.data.DataLoader(
+#       dataset=train_data,
+#       batch_size=args.batch_size,
+#       sampler=torch.utils.data.sampler.SubsetRandomSampler(search_indices),
+#       pin_memory=False,
+#       num_workers=4,
+#     )
+#   ]),
+#   "valid"  : torch.utils.data.DataLoader(
+#     dataset=valid_data,
+#     batch_size=args.batch_size,
+#     shuffle=False,
+#     pin_memory=True,
+#     num_workers=2,
+#   )
+# }
 
 # --
 # Define model
@@ -138,8 +138,8 @@ class Architecture(BaseNet):
   def __repr__(self):
     return 'Architecture(steps=%d | num_ops=%d)' % (self.steps, self.num_ops)
 
-cuda = torch.device('cuda')
-arch = Architecture(steps=args.steps, num_ops=num_ops).to(cuda)
+# cuda = torch.device('cuda')
+arch = Architecture(steps=args.steps, num_ops=num_ops)#.to(cuda)
 arch.init_optimizer(
   opt=torch.optim.Adam,
   params=arch.parameters(),
@@ -151,41 +151,44 @@ arch.init_optimizer(
 
 model = DARTSearchNetwork(
   arch=arch,
-  C=args.init_channels,
+  num_channels=args.init_channels,
   num_classes=args.num_classes,
-  layers=args.layers,
+  # layers=args.layers,
+  layers=4,
   steps=args.steps,
-).to(cuda)
+)#.to(cuda)
 model.verbose = True
 
-model.init_optimizer(
-  opt=torch.optim.SGD,
-  params=model.parameters(),
-  hp_scheduler={
-    "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
-  },
-  momentum=args.momentum,
-  weight_decay=args.weight_decay,
-  clip_grad_norm=5.0,
-)
+print(model)
 
-# --
-# Run
+# model.init_optimizer(
+#   opt=torch.optim.SGD,
+#   params=model.parameters(),
+#   hp_scheduler={
+#     "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
+#   },
+#   momentum=args.momentum,
+#   weight_decay=args.weight_decay,
+#   clip_grad_norm=5.0,
+# )
 
-t = time()
-for epoch in range(args.epochs):
-  train = model.train_epoch(dataloaders, mode='train', compute_acc=True)
-  valid = model.eval_epoch(dataloaders, mode='valid', compute_acc=True)
+# # --
+# # Run
+
+# t = time()
+# for epoch in range(args.epochs):
+#   train = model.train_epoch(dataloaders, mode='train', compute_acc=True)
+#   valid = model.eval_epoch(dataloaders, mode='valid', compute_acc=True)
   
-  print(json.dumps({
-    "epoch"      : int(epoch),
-    "train_loss" : float(np.mean(train['loss'][-10:])),
-    "train_acc"  : float(train['acc']),
-    "valid_loss" : float(np.mean(valid['loss'])),
-    "valid_acc"  : float(valid['acc']),
-  }))
-  sys.stdout.flush()
+#   print(json.dumps({
+#     "epoch"      : int(epoch),
+#     "train_loss" : float(np.mean(train['loss'][-10:])),
+#     "train_acc"  : float(train['acc']),
+#     "valid_loss" : float(np.mean(valid['loss'])),
+#     "valid_acc"  : float(valid['acc']),
+#   }))
+#   sys.stdout.flush()
   
-  torch.save(model.state_dict(), os.path.join(args.outpath, 'weights.pt'))
-  torch.save(arch.normal, os.path.join(args.outpath, 'normal_arch_e%d.pt' % epoch))
-  torch.save(arch.reduce, os.path.join(args.outpath, 'reduce_arch_e%d.pt' % epoch))
+#   torch.save(model.state_dict(), os.path.join(args.outpath, 'weights.pt'))
+#   torch.save(arch.normal, os.path.join(args.outpath, 'normal_arch_e%d.pt' % epoch))
+#   torch.save(arch.reduce, os.path.join(args.outpath, 'reduce_arch_e%d.pt' % epoch))
