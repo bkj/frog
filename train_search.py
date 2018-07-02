@@ -24,14 +24,18 @@ from torchvision import datasets
 
 import utils
 from operations import PRIMITIVES
-from model_search import DARTSearchNetwork
+from model_search import DARTSearchNetwork, DARTArchitecture
 
 from basenet import BaseNet, Metrics, HPSchedule
 from basenet.helpers import set_seeds
+from basenet.vision import transforms as btransforms
 
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
+
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 # --
 # CLI
@@ -39,6 +43,7 @@ torch.backends.cudnn.deterministic = True
 def parse_args():
   parser = argparse.ArgumentParser("cifar")
   parser.add_argument('--outpath', type=str, default="results/search/0")
+  parser.add_argument('--dataset', type=str, default='cifar10')
   parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
   parser.add_argument('--batch-size', type=int, default=64, help='batch size')
   
@@ -47,8 +52,7 @@ def parse_args():
   parser.add_argument('--momentum', type=float, default=0.9)
   parser.add_argument('--weight-decay', type=float, default=3e-4)
   
-  parser.add_argument('--num-classes', type=int, default=10)
-  parser.add_argument('--in-channels', type=int, default=16)
+  parser.add_argument('--op-channels', type=int, default=16)
   parser.add_argument('--num-layers', type=int, default=8)
   parser.add_argument('--num-nodes', type=int, default=4)
   
@@ -67,29 +71,29 @@ num_ops = len(PRIMITIVES)
 
 set_seeds(args.seed)
 
-train_transform, valid_transform = utils._data_transforms_cifar10(cutout=False)
-train_data = datasets.CIFAR10(root='./data', train=True, download=False, transform=train_transform)
-valid_data = datasets.CIFAR10(root='./data', train=False, download=False, transform=valid_transform)
+if args.dataset == 'cifar10':
+  dataset_fn = datasets.CIFAR10
+  in_channels = 3
+  num_classes = 10
+elif args.dataset == 'fashion_mnist':
+  dataset_fn = datasets.FashionMNIST
+  in_channels = 1
+  num_classes = 10
+
+train_transform, valid_transform = btransforms.DatasetPipeline(dataset=args.dataset)
+# if args.cutout:
+#   cutout = btransforms.Cutout(cut_h=args.cutout_length, cut_w=args.cutout_length)
+#   train_transform.transforms.append(cutout)
+
+train_data = dataset_fn(root='./data', train=True, download=False, transform=train_transform)
+valid_data = dataset_fn(root='./data', train=False, download=False, transform=valid_transform)
+
 
 # Is this necessary?
 train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5)
 
-class ZipDataloader:
-  def __init__(self, dataloaders):
-    self.dataloaders = dataloaders
-  
-  def __len__(self):
-    return max([len(d) for d in self.dataloaders])
-  
-  def __iter__(self):
-    counter = 0
-    iters = [iter(d) for d in self.dataloaders]
-    while counter < len(self):
-      yield tuple(zip(*[next(it) for it in iters]))
-      counter += 1
-
 dataloaders = {
-  "train"  : ZipDataloader([
+  "train"  : utils.ZipDataloader([
     torch.utils.data.DataLoader(
       dataset=train_data,
       batch_size=args.batch_size,
@@ -114,38 +118,8 @@ dataloaders = {
   )
 }
 
-# --
-# Define model
-
-class Architecture(BaseNet):
-  def __init__(self, num_nodes, num_ops, num_prev=2, scale=1e-3):
-    super().__init__(loss_fn=F.cross_entropy)
-    
-    self.num_nodes = num_nodes
-    self.num_ops   = num_ops
-    self.num_prev  = num_prev
-    
-    # ends = (np.arange(num_nodes) + 2).cumsum()
-    # self._breaks = np.column_stack([
-    #   np.hstack([[0], ends[:-1]]),
-    #   ends,
-    # ])
-    
-    n_edges     = num_prev * num_nodes + sum(range(num_nodes)) # Connections to inputs + connections to earlier num_nodes
-    self.normal = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
-    self.reduce = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
-  
-  def get_weights(self):
-    # !! Could do other logic in here
-    normal_weights = F.softmax(self.normal, dim=-1)
-    reduce_weights = F.softmax(self.reduce, dim=-1)
-    return normal_weights, reduce_weights
-  
-  def __repr__(self):
-    return 'Architecture(num_nodes=%d | num_ops=%d)' % (self.num_nodes, self.num_ops)
-
 cuda = torch.device('cuda')
-arch = Architecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
+arch = DARTArchitecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
 arch.init_optimizer(
   opt=torch.optim.Adam,
   params=arch.parameters(),
@@ -157,13 +131,14 @@ arch.init_optimizer(
 
 model = DARTSearchNetwork(
   arch=arch,
-  in_channels=args.in_channels,
-  num_classes=args.num_classes,
+  in_channels=in_channels,
+  num_classes=num_classes,
+  op_channels=args.op_channels,
   num_layers=args.num_layers,
   num_nodes=args.num_nodes,
 ).to(cuda)
 model.verbose = True
-print(model)
+print(model, file=sys.stderr)
 
 model.init_optimizer(
   opt=torch.optim.SGD,

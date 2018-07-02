@@ -20,8 +20,12 @@ CUDA_VISIBLE_DEVICES=4 python train_search.py --outpath results/search/1 |\
 
 # --
 
-rm -rf results/search-mnist/0
-mkdir -p results/search-mnist/0
-
-CUDA_VISIBLE_DEVICES=1 python train_search_mnist.py --outpath results/search-mnist/0 |\
-    tee results/search-mnist/0/log.jl
+mkdir -p results/search/mnist
+CUDA_VISIBLE_DEVICES=1 python train_search.py \
+    --outpath results/search/mnist/0 \
+    --dataset fashion_mnist \
+    --op-channels 4 \
+    
+    
+    |\
+    tee results/search/mnist/0/log.jl
