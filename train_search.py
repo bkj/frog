@@ -37,6 +37,8 @@ torch.backends.cudnn.deterministic = True
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
+NUM_WORKERS = 4
+
 # --
 # CLI
 
@@ -104,14 +106,14 @@ if not args.genotype:
         batch_size=args.batch_size,
         sampler=torch.utils.data.sampler.SubsetRandomSampler(train_indices),
         pin_memory=False,
-        num_workers=0,
+        num_workers=NUM_WORKERS,
       ),
       torch.utils.data.DataLoader(
         dataset=train_data,
         batch_size=args.batch_size,
         sampler=torch.utils.data.sampler.SubsetRandomSampler(search_indices),
         pin_memory=False,
-        num_workers=0,
+        num_workers=NUM_WORKERS,
       )
     ]),
     "valid"  : torch.utils.data.DataLoader(
@@ -119,7 +121,7 @@ if not args.genotype:
       batch_size=args.batch_size,
       shuffle=False,
       pin_memory=True,
-      num_workers=0,
+      num_workers=NUM_WORKERS,
     )
   }
   
@@ -185,7 +187,6 @@ model.init_optimizer(
 # --
 # Run
 
-print('ok')
 t = time()
 for epoch in range(args.epochs):
   train = model.train_epoch(dataloaders, mode='train', compute_acc=True)
@@ -197,7 +198,8 @@ for epoch in range(args.epochs):
     "train_acc"  : float(train['acc']),
     "valid_loss" : float(np.mean(valid['loss'])),
     "valid_acc"  : float(valid['acc']),
+    "model_lr"   : float(model.hp['lr']),
   }))
   sys.stdout.flush()
   
-  model.checkpoint(args.outpath)
+  model.checkpoint(outpath=args.outpath, epoch=epoch)

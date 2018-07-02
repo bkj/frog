@@ -65,7 +65,7 @@ class DARTEdge(nn.Module):
     for primitive in primitives:
       op = OPS[primitive](num_channels, stride, False)
       if 'pool' in primitive:
-        op = nn.Sequential(op, nn.BatchNorm2d(num_channels, affine=False))
+        op = nn.Sequential(op, nn.BatchNorm2d(num_channels, affine=False)) # No batchnorm when self._fixed
       self.add_module(primitive, op)
   
   def forward(self, x, weights):
@@ -119,6 +119,7 @@ class DARTSearchCell(nn.Module):
     self.num_nodes = layer['num_nodes']
     self.cat_last  = layer['cat_last']
     
+    # ?? Affine=True when self._fixed
     if layer_minus_1['reduction']:
       self.prep0 = FactorizedReduce(layer_minus_2['output_channels'], layer['op_channels'], affine=False)
     else:
@@ -261,7 +262,7 @@ class DARTSearchNetwork(_DARTNetwork):
     self._arch.train_batch(data_search, target_search, forward=self.forward)
     return super().train_batch(data_train, target_train, metric_fns=metric_fns)
     
-  def checkpoint(self, outpath):
+  def checkpoint(self, outpath, epoch):
     torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))
     torch.save(self._arch.normal, os.path.join(outpath, 'normal_arch_e%d.pt' % epoch))
     torch.save(self._arch.reduce, os.path.join(outpath, 'reduce_arch_e%d.pt' % epoch))
@@ -273,6 +274,6 @@ class DARTTrainNetwork(_DARTNetwork):
     self._fixed = True
     for cell in self.cells:
       cell.fix_weights(genotype)
-    
-  def checkpoint(self, outpath):
-    torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))
+  
+  def checkpoint(self, outpath, epoch):
+    torch.save(self.state_dict(), os.path.join(outpath, 'weights_e%d.pt' % epoch))
