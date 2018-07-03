@@ -52,7 +52,7 @@ def parse_args():
   parser.add_argument('--weight-decay', type=float, default=3e-4)
   parser.add_argument('--cutout-length', type=int, default=0)
   
-  parser.add_argument('--op-channels', type=int, default=2)
+  parser.add_argument('--op-channels', type=int, default=16)
   parser.add_argument('--num-layers', type=int, default=8)
   parser.add_argument('--num-nodes', type=int, default=4)
   

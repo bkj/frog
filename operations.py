@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
-torch.set_default_tensor_type('torch.DoubleTensor')
+
+from collections import namedtuple
+Genotype = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat')
 
 OPS = {
   'none' : lambda C, stride, affine: Zero(stride),

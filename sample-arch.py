@@ -20,8 +20,7 @@ from torch.nn import functional as F
 from torch.autograd import Variable
 
 from basenet.helpers import to_numpy
-from genotypes import Genotype
-from operations import PRIMITIVES
+from operations import PRIMITIVES, Genotype
 
 np.set_printoptions(linewidth=120)
 
