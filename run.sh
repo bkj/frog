@@ -27,9 +27,25 @@ CUDA_VISIBLE_DEVICES=4 python main.py --outpath results/search/1 |\
 # --
 
 EXP_DIR="results/search/mnist/0/"
-rm -rf $EXP_DIR
+# rm -rf $EXP_DIR
 mkdir -p $EXP_DIR
 CUDA_VISIBLE_DEVICES=1 python main.py \
     --outpath $EXP_DIR \
     --dataset fashion_mnist \
     --unrolled |tee $EXP_DIR/search.jl
+
+i=4
+python sample-arch.py \
+    --normal-path $EXP_DIR/normal_arch_e$i.pt \
+    --reduce-path $EXP_DIR/reduce_arch_e$i.pt \
+    --as-matrix \
+    --outpath $EXP_DIR/genotype-$i.npy
+
+mkdir -p $EXP_DIR/$i
+CUDA_VISIBLE_DEVICES=1 python main.py \
+    --genotype $EXP_DIR/genotype-$i.npy \
+    --outpath $EXP_DIR/$i \
+    --epochs 10 \
+    --lr-max 0.1 \
+    --dataset fashion_mnist \
+    --unrolled | tee $EXP_DIR/$i/train.jl

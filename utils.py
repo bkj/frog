@@ -15,9 +15,10 @@ def loopy_wrapper(gen):
 class ZipDataloader:
   def __init__(self, dataloaders):
     self.dataloaders = dataloaders
+    self._len = len(dataloaders[0])
   
   def __len__(self):
-    return len(self.dataloaders[0])
+    return self._len
   
   def __iter__(self):
     counter = 0
