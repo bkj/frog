@@ -40,7 +40,7 @@ class DARTArchitecture(BaseNet):
     self.reduce = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
   
   def get_logits(self):
-    return self.normal, self.reduct
+    return self.normal, self.reduce
     
   def get_weights(self):
     # !! Could do other logic in here
