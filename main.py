@@ -6,6 +6,7 @@
 
 from __future__ import print_function, division
 
+import os
 import sys
 import json
 import warnings
@@ -67,6 +68,8 @@ def parse_args():
 # Run
 
 args = parse_args()
+print(vars(args), file=sys.stderr)
+json.dump(vars(args), open(os.path.join(args.outpath, 'config.json'), 'w'))
 
 num_ops = len(PRIMITIVES)
 
