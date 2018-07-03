@@ -20,7 +20,10 @@ from torch.nn import functional as F
 from torch.autograd import Variable
 
 from basenet.helpers import to_numpy
-from operations import PRIMITIVES, Genotype
+from operations import PRIMITIVES
+
+from collections import namedtuple
+Genotype = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat')
 
 np.set_printoptions(linewidth=120)
 

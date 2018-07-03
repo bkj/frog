@@ -13,7 +13,13 @@ CUDA_VISIBLE_DEVICES=7 python main.py --outpath results/search/0 |\
 python sample-arch.py \
     --normal-path results/search/0/normal_arch_e49.pt \
     --reduce-path results/search/0/reduce_arch_e49.pt \
-    --outpath genotype.pkl
+    --outpath results/search/0/genotype.pkl
+
+python sample-arch.py \
+    --normal-path results/search/0/normal_arch_e49.pt \
+    --reduce-path results/search/0/reduce_arch_e49.pt \
+    --as-matrix \
+    --outpath results/search/0/genotype.npy
 
 CUDA_VISIBLE_DEVICES=4 python main.py --outpath results/search/1 |\
     tee results/search/1/log.jl
