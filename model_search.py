@@ -90,7 +90,7 @@ class DARTArchitecture(BaseNet):
     # model = model.deepcopy()
     state_dict     = deepcopy(model.state_dict())
     opt_state_dict = deepcopy(model.opt.state_dict())
-    wd = model.opt.defaults['weight_decay']
+    wd = model.opt.state_dict()['param_groups'][0]['weight_decay']
     assert wd == 3e-4
     
     # Take a step
