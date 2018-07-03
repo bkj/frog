@@ -352,9 +352,7 @@ class DARTSearchNetwork(_DARTNetwork):
     else:
       self._arch_train_batch(data_search, target_search, forward=self.forward)
     
-    loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
-    print('loss', float(loss))
-    return loss, metrics
+    return super().train_batch(data_train, target_train, metric_fns=metric_fns)
   
   def checkpoint(self, outpath, epoch):
     torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))
