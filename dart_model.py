@@ -24,9 +24,6 @@ TORCH_VERSION_4 = '0.4' == torch.__version__[:3]
 # --
 # Architecture
 
-def _concat(xs):
-  return torch.cat([x.view(-1) for x in xs])
-
 
 class DARTArchitecture(BaseNet):
   def __init__(self, num_nodes, num_ops, num_prev=2, scale=1e-3):
@@ -35,12 +32,6 @@ class DARTArchitecture(BaseNet):
     self.num_nodes = num_nodes
     self.num_ops   = num_ops
     self.num_prev  = num_prev
-    
-    # ends = (np.arange(num_nodes) + 2).cumsum()
-    # self._breaks = np.column_stack([
-    #   np.hstack([[0], ends[:-1]]),
-    #   ends,
-    # ])
     
     n_edges     = num_prev * num_nodes + sum(range(num_nodes)) # Connections to inputs + connections to earlier num_nodes
     self.normal = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
@@ -59,37 +50,39 @@ class DARTArchitecture(BaseNet):
     return 'DARTArchitecture(num_nodes=%d | num_ops=%d)' % (self.num_nodes, self.num_ops)
   
   def unrolled_train_batch(self, model, data_train, target_train, data_search, target_search, **kwargs):
-      assert self.loss_fn is not None, 'DARTArchitecture: self.loss_fn is None'
-      assert self.training, 'DARTArchitecture: self.training == False'
-      
-      self.opt.zero_grad()
-      
-      if not TORCH_VERSION_4:
-          data_train, target_train = Variable(data_train), Variable(target_train)
-          data_search, target_search = Variable(data_search), Variable(target_search)
-      
-      data_train, target_train = to_device(data_train, self.device), to_device(target_train, self.device)
-      data_search, target_search = to_device(data_search, self.device), to_device(target_search, self.device)
-      
-      self._backward_step_unrolled(model, data_train, target_train, data_search, target_search)
-      
-      if self.clip_grad_norm > 0:
-          if TORCH_VERSION_4:
-              grad_norm = torch.nn.utils.clip_grad_norm_(self.params, self.clip_grad_norm)
-          else:
-              grad_norm = torch.nn.utils.clip_grad_norm(self.params, self.clip_grad_norm)
-      
-      self.opt.step()
-      
-      return -1.0 # Return dummy loss
+    # !! Could probably be simplified
+    
+    assert self.loss_fn is not None, 'DARTArchitecture: self.loss_fn is None'
+    assert self.training, 'DARTArchitecture: self.training == False'
+    
+    self.opt.zero_grad()
+    
+    if not TORCH_VERSION_4:
+        data_train, target_train = Variable(data_train), Variable(target_train)
+        data_search, target_search = Variable(data_search), Variable(target_search)
+    
+    data_train, target_train = to_device(data_train, self.device), to_device(target_train, self.device)
+    data_search, target_search = to_device(data_search, self.device), to_device(target_search, self.device)
+    
+    search_loss = self._compute_unrolled_grads(model, data_train, target_train, data_search, target_search)
+    
+    if self.clip_grad_norm > 0:
+        if TORCH_VERSION_4:
+            grad_norm = torch.nn.utils.clip_grad_norm_(self.params, self.clip_grad_norm)
+        else:
+            grad_norm = torch.nn.utils.clip_grad_norm(self.params, self.clip_grad_norm)
+    
+    self.opt.step()
+    
+    return float(search_loss)
 
-  def _backward_step_unrolled(self, model, data_train, target_train, data_search, target_search):
+  def _compute_unrolled_grads(self, model, data_train, target_train, data_search, target_search):
     
     # Store model state
     state_dict     = deepcopy(model.state_dict())
     opt_state_dict = deepcopy(model.opt.state_dict())
     wd = model.opt.state_dict()['param_groups'][0]['weight_decay']
-    assert wd == 3e-4
+    assert wd == 3e-4 # !! Sanity check for now
     
     # Take a step
     model.opt.zero_grad()
@@ -98,9 +91,9 @@ class DARTArchitecture(BaseNet):
     model.opt.step()
     
     # Compute grad w.r.t architecture
-    valid_loss     = self.loss_fn(model(data_search), target_search)
-    grads          = torch.autograd.grad(valid_loss, [self.normal, self.reduce], retain_graph=True)
-    dtheta         = torch.autograd.grad(valid_loss, model.parameters())
+    search_loss    = self.loss_fn(model(data_search), target_search)
+    grads          = torch.autograd.grad(search_loss, [self.normal, self.reduce], retain_graph=True)
+    dtheta         = torch.autograd.grad(search_loss, model.parameters())
     vector         = [dt.add(wd, t).data for dt, t in zip(dtheta, model.parameters())]
     implicit_grads = self._hessian_vector_product(model, vector, data_train, target_train)
     _ = [g.data.sub_(model.hp['lr'], ig.data) for g, ig in zip(grads, implicit_grads)]
@@ -115,9 +108,13 @@ class DARTArchitecture(BaseNet):
         v.grad = g.data
       else:
         v.grad.data.copy_(g.data)
+      
+    return float(search_loss)
     
   def _hessian_vector_product(self, model, vector, data, target, r=1e-2):
-    R = r / _concat(vector).norm()
+    # Changes model weights
+    
+    R = r / torch.cat([v.view(-1) for v in vector]).norm()
     
     # plus R
     _ = [p.data.add_(R, v) for p, v in zip(model.parameters(), vector)]
@@ -337,10 +334,10 @@ class _DARTNetwork(BaseNet):
 class DARTSearchNetwork(_DARTNetwork):
   def __init__(self, arch, unrolled=False, **kwargs):
     super().__init__(**kwargs)
+    assert self.loss_fn == arch.loss_fn, "DARTSearchNetwork.loss_fn != arch.loss_fn"
     
     # A little awkward, but we don't want arch.parameters to show up in model.parameters
-    self._unrolled = unrolled
-    
+    self._unrolled         = unrolled
     self._arch_get_weights = arch.get_weights
     self._arch_get_logits  = arch.get_logits
     self._arch_train_batch = arch.unrolled_train_batch if unrolled else arch.train_batch
@@ -358,7 +355,7 @@ class DARTSearchNetwork(_DARTNetwork):
     loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
     print('loss', float(loss))
     return loss, metrics
-    
+  
   def checkpoint(self, outpath, epoch):
     torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))
     normal_logits, reduce_logits = self._arch_get_logits()
