@@ -8,15 +8,18 @@ import sys
 from rsub import *
 from matplotlib import pyplot as plt
 import seaborn as sns
+import numpy as np
 
 import torch
 from torch.nn import functional as F
-
+torch.set_printoptions(linewidth=120)
+np.set_printoptions(linewidth=120)
 from basenet.helpers import to_numpy
 
 arch = torch.load(sys.argv[1], map_location=lambda *x: x[0])
 arch = F.softmax(arch, dim=-1)
 arch = to_numpy(arch)
+print(arch)
 
 # Heatmap of weights
 _ = sns.heatmap(arch)
