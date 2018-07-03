@@ -6,6 +6,12 @@
 
 import itertools
 
+def loopy_wrapper(gen):
+  while True:
+    for x in gen:
+      yield x
+
+
 class ZipDataloader:
   def __init__(self, dataloaders):
     self.dataloaders = dataloaders
@@ -15,7 +21,7 @@ class ZipDataloader:
   
   def __iter__(self):
     counter = 0
-    iters = [iter(self.dataloaders[0])] + [itertools.cycle(iter(d)) for d in self.dataloaders[1:]]
+    iters = [loopy_wrapper(d) for d in self.dataloaders]
     while counter < len(self):
       yield tuple(zip(*[next(it) for it in iters]))
       counter += 1
