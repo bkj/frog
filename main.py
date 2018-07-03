@@ -22,7 +22,7 @@ from torchvision import datasets
 
 from utils import ZipDataloader
 from operations import PRIMITIVES
-from model_search import DARTSearchNetwork, DARTTrainNetwork, DARTArchitecture
+from dart_model import DARTSearchNetwork, DARTTrainNetwork, DARTArchitecture
 
 from basenet.helpers import set_seeds
 from basenet import BaseNet, Metrics, HPSchedule

@@ -7,7 +7,7 @@ source activate dart_env
 rm -rf results/search/0
 mkdir -p results/search/0
 
-# CUDA_VISIBLE_DEVICES=1 python train_search.py --outpath results/search/0 |\
+# CUDA_VISIBLE_DEVICES=1 python main.py --outpath results/search/0 |\
 #     tee results/search/0/log.jl
 
 # python sample-arch.py \
@@ -15,14 +15,14 @@ mkdir -p results/search/0
 #     --reduce-path results/search/0/reduce_arch_e49.pt \
 #     --outpath genotype.pkl
 
-CUDA_VISIBLE_DEVICES=4 python train_search.py --outpath results/search/1 |\
+CUDA_VISIBLE_DEVICES=4 python main.py --outpath results/search/1 |\
     tee results/search/1/log.jl
 
 # --
 
 rm -rf results/search/mnist/0
 mkdir -p results/search/mnist/0
-CUDA_VISIBLE_DEVICES=1 python train_search.py \
+CUDA_VISIBLE_DEVICES=1 python main.py \
     --outpath results/search/mnist/0 \
     --dataset fashion_mnist \
     --op-channels 4 \
@@ -40,7 +40,7 @@ python sample-arch.py \
     --outpath results/search/mnist/0/genotype.npy \
     --as-matrix
 
-CUDA_VISIBLE_DEVICES=1 python train_search.py \
+CUDA_VISIBLE_DEVICES=1 python main.py \
     --outpath scratch \
     --dataset fashion_mnist \
     --genotype results/search/mnist/0/genotype.npy \

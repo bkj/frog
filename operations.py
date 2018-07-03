@@ -1,6 +1,11 @@
+#!/usr/bin/env python
+
+"""
+  operations.py
+"""
+
 import torch
 import torch.nn as nn
-
 from collections import namedtuple
 Genotype = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat')
 
