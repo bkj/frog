@@ -29,7 +29,7 @@ from basenet.helpers import set_seeds
 from basenet import BaseNet, Metrics, HPSchedule
 from basenet.vision import transforms as btransforms
 
-NUM_WORKERS = 4
+NUM_WORKERS = 0
 warnings.simplefilter(action='ignore', category=FutureWarning)
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
@@ -68,12 +68,12 @@ def parse_args():
 # Run
 
 args = parse_args()
+set_seeds(args.seed)
+
 print(json.dumps(vars(args)), file=sys.stderr)
 json.dump(vars(args), open(os.path.join(args.outpath, 'config.json'), 'w'))
 
 num_ops = len(PRIMITIVES)
-
-set_seeds(args.seed)
 
 if args.dataset == 'cifar10':
   dataset_fn = datasets.CIFAR10
@@ -92,7 +92,8 @@ if args.cutout_length > 0:
 train_data = dataset_fn(root='./data', train=True, download=False, transform=train_transform)
 valid_data = dataset_fn(root='./data', train=False, download=False, transform=valid_transform)
 
-cuda = torch.device('cuda')
+# cuda = torch.device('cuda')
+cuda = 'cuda'
 
 if not args.genotype:
   train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5, random_state=789)

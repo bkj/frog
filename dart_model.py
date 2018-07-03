@@ -7,6 +7,7 @@
 import os
 import sys
 import numpy as np
+from time import time
 from copy import deepcopy
 
 import torch
@@ -79,8 +80,7 @@ class DARTArchitecture(BaseNet):
   def _compute_unrolled_grads(self, model, data_train, target_train, data_search, target_search):
     
     # Store model state
-    state_dict     = deepcopy(model.state_dict())
-    opt_state_dict = deepcopy(model.opt.state_dict())
+    model = model.deepcopy()
     wd = model.opt.state_dict()['param_groups'][0]['weight_decay']
     assert wd == 3e-4 # !! Sanity check for now
     
@@ -94,13 +94,9 @@ class DARTArchitecture(BaseNet):
     search_loss    = self.loss_fn(model(data_search), target_search)
     grads          = torch.autograd.grad(search_loss, [self.normal, self.reduce], retain_graph=True)
     dtheta         = torch.autograd.grad(search_loss, model.parameters())
-    vector         = [dt.add(wd, t).data for dt, t in zip(dtheta, model.parameters())]
-    implicit_grads = self._hessian_vector_product(model, vector, data_train, target_train)
+    dtheta         = [dt.add(wd, t).data for dt, t in zip(dtheta, model.parameters())]
+    implicit_grads = self._hessian_vector_product(model, dtheta, data_train, target_train)
     _ = [g.data.sub_(model.hp['lr'], ig.data) for g, ig in zip(grads, implicit_grads)]
-    
-    # Reset model
-    model.load_state_dict(state_dict)
-    model.opt.load_state_dict(opt_state_dict)
     
     # Add gradient to architecture
     for v, g in zip([self.normal, self.reduce], grads):
@@ -111,17 +107,17 @@ class DARTArchitecture(BaseNet):
       
     return float(search_loss)
     
-  def _hessian_vector_product(self, model, vector, data, target, r=1e-2):
+  def _hessian_vector_product(self, model, dtheta, data, target, r=1e-2):
     # Changes model weights
     
-    R = r / torch.cat([v.view(-1) for v in vector]).norm()
+    R = r / torch.cat([v.view(-1) for v in dtheta]).norm()
     
     # plus R
-    _ = [p.data.add_(R, v) for p, v in zip(model.parameters(), vector)]
+    _ = [p.data.add_(R, v) for p, v in zip(model.parameters(), dtheta)]
     grads_pos = torch.autograd.grad(self.loss_fn(model(data), target), [self.normal, self.reduce])
     
     # minus R
-    _ = [p.data.sub_(2*R, v) for p, v in zip(model.parameters(), vector)]
+    _ = [p.data.sub_(2*R, v) for p, v in zip(model.parameters(), dtheta)]
     grads_neg = torch.autograd.grad(self.loss_fn(model(data), target), [self.normal, self.reduce])
     
     return [(x - y).div_(2*R) for x, y in zip(grads_pos, grads_neg)]
@@ -344,7 +340,15 @@ class DARTSearchNetwork(_DARTNetwork):
     
     self._fixed = False
   
+  def deepcopy(self):
+    new_model = super().deepcopy()
+    new_model._arch_get_weights = self._arch_get_weights
+    new_model._arch_get_logits  = self._arch_get_logits 
+    new_model._arch_train_batch = self._arch_train_batch
+    return new_model
+  
   def train_batch(self, data, target, metric_fns=None):
+    t = time()
     data_train, data_search = data
     target_train, target_search = target
     if self._unrolled:
@@ -352,7 +356,9 @@ class DARTSearchNetwork(_DARTNetwork):
     else:
       self._arch_train_batch(data_search, target_search, forward=self.forward)
     
-    return super().train_batch(data_train, target_train, metric_fns=metric_fns)
+    loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
+    print('loss', float(loss), time() - t)
+    return loss, metrics
   
   def checkpoint(self, outpath, epoch):
     torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))
