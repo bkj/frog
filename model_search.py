@@ -16,6 +16,8 @@ from basenet import BaseNet
 
 from operations import *
 
+torch.set_default_tensor_type('torch.DoubleTensor')
+
 # --
 # Architecture
 
@@ -34,9 +36,12 @@ class DARTArchitecture(BaseNet):
     # ])
     
     n_edges     = num_prev * num_nodes + sum(range(num_nodes)) # Connections to inputs + connections to earlier num_nodes
-    self.normal = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
-    self.reduce = nn.Parameter(torch.FloatTensor(np.random.normal(0, scale, (n_edges, num_ops))))
+    self.normal = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
+    self.reduce = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
   
+  def get_logits(self):
+    return self.normal, self.reduct
+    
   def get_weights(self):
     # !! Could do other logic in here
     normal_weights = F.softmax(self.normal, dim=-1)
@@ -235,7 +240,7 @@ class _DARTNetwork(BaseNet):
   def forward(self, x):
     weights = None
     if not self._fixed:
-      normal_weights, reduce_weights = self._arch.get_weights()
+      normal_weights, reduce_weights = self._arch_get_weights()
     
     x = self.stem(x)
     states = [x] * self.num_inputs
@@ -253,19 +258,27 @@ class _DARTNetwork(BaseNet):
 class DARTSearchNetwork(_DARTNetwork):
   def __init__(self, arch, *args, **kwargs):
     super().__init__(*args, **kwargs)
-    self._arch = arch
+    
+    # A little awkward, but we don't want arch.parameters to show up in model.parameters
+    self._arch_get_weights = arch.get_weights
+    self._arch_get_logits  = arch.get_logits
+    self._arch_train_batch = arch.train_batch
+    
     self._fixed = False
   
   def train_batch(self, data, target, metric_fns=None):
     data_train, data_search = data
     target_train, target_search = target
-    self._arch.train_batch(data_search, target_search, forward=self.forward)
-    return super().train_batch(data_train, target_train, metric_fns=metric_fns)
+    loss, _ = self._arch_train_batch(data_search, target_search, forward=self.forward)
+    loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
+    print('model_loss', float(loss))
+    return loss, metrics
     
   def checkpoint(self, outpath, epoch):
     torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))
-    torch.save(self._arch.normal, os.path.join(outpath, 'normal_arch_e%d.pt' % epoch))
-    torch.save(self._arch.reduce, os.path.join(outpath, 'reduce_arch_e%d.pt' % epoch))
+    normal_logits, reduce_logits = self._arch_get_logits()
+    torch.save(normal_logits, os.path.join(outpath, 'normal_arch_e%d.pt' % epoch))
+    torch.save(reduce_logits, os.path.join(outpath, 'reduce_arch_e%d.pt' % epoch))
 
 
 class DARTTrainNetwork(_DARTNetwork):

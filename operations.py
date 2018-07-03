@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+torch.set_default_tensor_type('torch.DoubleTensor')
 
 OPS = {
   'none' : lambda C, stride, affine: Zero(stride),

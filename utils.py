@@ -11,11 +11,11 @@ class ZipDataloader:
     self.dataloaders = dataloaders
   
   def __len__(self):
-    return max([len(d) for d in self.dataloaders])
+    return len(self.dataloaders[0])
   
   def __iter__(self):
     counter = 0
-    iters = [itertools.cycle(iter(d)) for d in self.dataloaders]
+    iters = [iter(self.dataloaders[0])] + [itertools.cycle(iter(d)) for d in self.dataloaders[1:]]
     while counter < len(self):
       yield tuple(zip(*[next(it) for it in iters]))
       counter += 1
