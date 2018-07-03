@@ -16,8 +16,6 @@ from basenet import BaseNet
 
 from operations import *
 
-torch.set_default_tensor_type('torch.DoubleTensor')
-
 # --
 # Architecture
 
@@ -269,10 +267,8 @@ class DARTSearchNetwork(_DARTNetwork):
   def train_batch(self, data, target, metric_fns=None):
     data_train, data_search = data
     target_train, target_search = target
-    loss, _ = self._arch_train_batch(data_search, target_search, forward=self.forward)
-    loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
-    print('model_loss', float(loss))
-    return loss, metrics
+    self._arch_train_batch(data_search, target_search, forward=self.forward)
+    return super().train_batch(data_train, target_train, metric_fns=metric_fns)
     
   def checkpoint(self, outpath, epoch):
     torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))

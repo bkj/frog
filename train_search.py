@@ -6,39 +6,33 @@
 
 from __future__ import print_function, division
 
-import os
 import sys
 import json
+import warnings
 import argparse
-import itertools
 import numpy as np
-from tqdm import tqdm
 from time import time
 from sklearn.model_selection import train_test_split
 
 import torch
-torch.set_default_tensor_type('torch.DoubleTensor')
 from torch import nn
 from torch.nn import functional as F
 import torch.utils.data
 from torchvision import datasets
 
-import utils
+from utils import ZipDataloader
 from operations import PRIMITIVES
 from model_search import DARTSearchNetwork, DARTTrainNetwork, DARTArchitecture
 
-from basenet import BaseNet, Metrics, HPSchedule
 from basenet.helpers import set_seeds
+from basenet import BaseNet, Metrics, HPSchedule
 from basenet.vision import transforms as btransforms
 
+NUM_WORKERS = 4
+warnings.simplefilter(action='ignore', category=FutureWarning)
 torch.backends.cudnn.enabled = True
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
-
-import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
-
-NUM_WORKERS = 0
 
 # --
 # CLI
@@ -86,40 +80,21 @@ elif args.dataset == 'fashion_mnist':
   in_channels = 1
   num_classes = 10
 
-# train_transform, valid_transform = btransforms.DatasetPipeline(dataset=args.dataset)
-# if args.cutout_length > 0:
-#   cutout = btransforms.Cutout(cut_h=args.cutout_length, cut_w=args.cutout_length)
-#   train_transform.transforms.append(cutout)
-
-from torchvision import transforms
-def _data_transforms_cifar10():
-  CIFAR_MEAN = [0.49139968, 0.48215827, 0.44653124]
-  CIFAR_STD = [0.24703233, 0.24348505, 0.26158768]
-  
-  train_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Lambda(lambda x: x.double()),
-  ])
-  valid_transform = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Lambda(lambda x: x.double()),
-  ])
-  return train_transform, valid_transform
-
-train_transform, valid_transform = _data_transforms_cifar10()
+train_transform, valid_transform = btransforms.DatasetPipeline(dataset=args.dataset)
+if args.cutout_length > 0:
+  cutout = btransforms.Cutout(cut_h=args.cutout_length, cut_w=args.cutout_length)
+  train_transform.transforms.append(cutout)
 
 train_data = dataset_fn(root='./data', train=True, download=False, transform=train_transform)
 valid_data = dataset_fn(root='./data', train=False, download=False, transform=valid_transform)
 
-cuda = 'cuda' # torch.device('cuda')
+cuda = torch.device('cuda')
 
 if not args.genotype:
-  # Is this necessary?
   train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5, random_state=789)
   
-  set_seeds(111)
   dataloaders = {
-    "train"  : utils.ZipDataloader([
+    "train"  : ZipDataloader([
       torch.utils.data.DataLoader(
         dataset=train_data,
         batch_size=args.batch_size,
@@ -144,7 +119,6 @@ if not args.genotype:
     )
   }
   
-  set_seeds(222)
   arch = DARTArchitecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
   arch.init_optimizer(
     opt=torch.optim.Adam,
@@ -152,10 +126,9 @@ if not args.genotype:
     lr=args.arch_lr,
     betas=(0.5, 0.999),
     weight_decay=args.arch_weight_decay,
-    clip_grad_norm=10.
+    clip_grad_norm=10.0,
   )
   
-  set_seeds(333)
   model = DARTSearchNetwork(
     arch=arch,
     in_channels=in_channels,
@@ -182,7 +155,6 @@ else:
     )
   }
   
-  # Check that `num_nodes` and `genotype` sizes work
   model = DARTTrainNetwork(
     genotype=np.load(args.genotype),
     in_channels=in_channels,
@@ -194,14 +166,13 @@ else:
 
 
 model.verbose = False
-# print(model, file=sys.stderr)
+print(model, file=sys.stderr)
 
 model.init_optimizer(
   opt=torch.optim.SGD,
   params=model.parameters(),
   hp_scheduler={
-    # "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
-    "lr" : HPSchedule.constant(0.1)
+    "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
   },
   momentum=args.momentum,
   weight_decay=args.weight_decay,
@@ -210,7 +181,6 @@ model.init_optimizer(
 
 # --
 # Run
-set_seeds(444)
 
 t = time()
 for epoch in range(args.epochs):
