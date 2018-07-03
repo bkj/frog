@@ -165,7 +165,7 @@ else:
   ).to(cuda)
 
 
-model.verbose = False
+model.verbose = True
 print(model, file=sys.stderr)
 
 model.init_optimizer(
