@@ -64,6 +64,7 @@ def parse_args():
   
   parser.add_argument('--arch-lr', type=float, default=3e-4)
   parser.add_argument('--arch-weight-decay', type=float, default=1e-3)
+  parser.add_argument('--unrolled', action="store_true")
   
   parser.add_argument('--seed', type=int, default=123)
   return parser.parse_args()
@@ -158,6 +159,7 @@ if not args.genotype:
   set_seeds(333)
   model = DARTSearchNetwork(
     arch=arch,
+    unrolled=args.unrolled,
     in_channels=in_channels,
     num_classes=num_classes,
     op_channels=args.op_channels,
