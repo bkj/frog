@@ -4,25 +4,22 @@
 
 source activate dart_env
 
-rm -rf results/search/1
-mkdir -p results/search/1
+RUN_ID="results/search/2"
+rm -rf $RUN_ID
+mkdir -p $RUN_ID
 CUDA_VISIBLE_DEVICES=5 python main.py \
-    --outpath results/search/1 \
-    --unrolled | tee results/search/1/log.jl
+    --outpath $RUN_ID \
+    --unrolled | tee $RUN_ID/log.jl
 
 python sample-arch.py \
-    --normal-path results/search/0/normal_arch_e49.pt \
-    --reduce-path results/search/0/reduce_arch_e49.pt \
-    --outpath results/search/0/genotype.pkl
+    --normal-path $RUN_ID/normal_arch_e49.pt \
+    --reduce-path $RUN_ID/reduce_arch_e49.pt \
+    --outpath $RUN_ID/genotype.pkl
 
-python sample-arch.py \
-    --normal-path results/search/0/normal_arch_e49.pt \
-    --reduce-path results/search/0/reduce_arch_e49.pt \
-    --as-matrix \
-    --outpath results/search/0/genotype.npy
 
-CUDA_VISIBLE_DEVICES=4 python main.py --outpath results/search/1 |\
-    tee results/search/1/log.jl
+# CUDA_VISIBLE_DEVICES=4 python main.py --outpath results/search/1 |\
+#     tee results/search/1/log.jl
+
 
 # --
 
@@ -34,18 +31,53 @@ CUDA_VISIBLE_DEVICES=1 python main.py \
     --dataset fashion_mnist \
     --unrolled |tee $EXP_DIR/search.jl
 
-i=4
-python sample-arch.py \
-    --normal-path $EXP_DIR/normal_arch_e$i.pt \
-    --reduce-path $EXP_DIR/reduce_arch_e$i.pt \
-    --as-matrix \
-    --outpath $EXP_DIR/genotype-$i.npy
+for i in $(seq 0 49); do
+    python sample-arch.py \
+        --normal-path $EXP_DIR/normal_arch_e$i.pt \
+        --reduce-path $EXP_DIR/reduce_arch_e$i.pt \
+        --as-matrix \
+        --outpath $EXP_DIR/genotype-$i.npy
+done
 
-mkdir -p $EXP_DIR/$i
-CUDA_VISIBLE_DEVICES=1 python main.py \
-    --genotype $EXP_DIR/genotype-$i.npy \
-    --outpath $EXP_DIR/$i \
-    --epochs 10 \
-    --lr-max 0.1 \
-    --dataset fashion_mnist \
-    --unrolled | tee $EXP_DIR/$i/train.jl
+for i in $(seq 0 49 | tac); do
+    mkdir -p $EXP_DIR/$i
+    CUDA_VISIBLE_DEVICES=0 python main.py \
+        --genotype $EXP_DIR/genotype-$i.npy \
+        --outpath $EXP_DIR/$i \
+        --epochs 10 \
+        --lr-max 0.1 \
+        --dataset fashion_mnist | tee $EXP_DIR/$i/train.jl
+done
+
+for i in $(seq 0 49 | shuf); do
+    mkdir -p $EXP_DIR/$i.e20
+    CUDA_VISIBLE_DEVICES=0 python tmp-main.py \
+        --genotype $EXP_DIR/genotype-$i.npy \
+        --outpath $EXP_DIR/$i.e20 \
+        --epochs 30 \
+        --lr-max 0.1 \
+        --dataset fashion_mnist | tee $EXP_DIR/$i.e20/train.jl
+done
+
+for i in $(seq 0 49 | shuf); do
+    mkdir -p $EXP_DIR/$i.e20_l16
+    CUDA_VISIBLE_DEVICES=0 python tmp-main.py \
+        --genotype $EXP_DIR/genotype-$i.npy \
+        --outpath $EXP_DIR/$i.e20_l16 \
+        --num-layers 16 \
+        --epochs 30 \
+        --lr-max 0.1 \
+        --dataset fashion_mnist | tee $EXP_DIR/$i.e20_l16/train.jl
+done
+
+intervals=(0 9 19 29 39 49)
+for i in ${intervals[@]}; do
+    mkdir -p $EXP_DIR/$i.e64_l20
+    CUDA_VISIBLE_DEVICES=0 python tmp-main.py \
+        --genotype $EXP_DIR/genotype-$i.npy \
+        --outpath $EXP_DIR/$i.e64_l20 \
+        --num-layers 20 \
+        --epochs 64 \
+        --lr-max 0.1 \
+        --dataset fashion_mnist | tee $EXP_DIR/$i.e64_l20/train.jl
+done
