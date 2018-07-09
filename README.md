@@ -1,4 +1,4 @@
-#### frog
+### frog
 
 Port of [DARTS](https://github.com/quark0/darts) neural architecture search.  Currently, have only implemented the CNN portion.  
 
