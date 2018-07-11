@@ -21,13 +21,12 @@ from torch.nn import functional as F
 import torch.utils.data
 from torchvision import datasets
 
-from utils import ZipDataloader
-from operations import PRIMITIVES
-from dart_model import DARTSearchNetwork, DARTTrainNetwork, DARTArchitecture
-
+from basenet.data import ZipDataloader
 from basenet.helpers import set_seeds
 from basenet import BaseNet, Metrics, HPSchedule
 from basenet.vision import transforms as btransforms
+
+from frog.models import cifar
 
 NUM_WORKERS = 6
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -73,13 +72,13 @@ set_seeds(args.seed)
 print(json.dumps(vars(args)), file=sys.stderr)
 json.dump(vars(args), open(os.path.join(args.outpath, 'config.json'), 'w'))
 
-num_ops = len(PRIMITIVES)
-
 if args.dataset == 'cifar10':
+    model = cifar
     dataset_fn = datasets.CIFAR10
     in_channels = 3
     num_classes = 10
 elif args.dataset == 'fashion_mnist':
+    raise Exception, 'no fashion_mnist model!'
     dataset_fn = datasets.FashionMNIST
     in_channels = 1
     num_classes = 10
@@ -123,7 +122,7 @@ if not args.genotype:
         )
     }
     
-    arch = DARTArchitecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
+    arch = model.Architecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
     arch.init_optimizer(
         opt=torch.optim.Adam,
         params=arch.parameters(),
@@ -133,15 +132,15 @@ if not args.genotype:
         clip_grad_norm=10.0,
     )
     
-    model = DARTSearchNetwork(
-        arch=arch,
+    model = model.Network(
         unrolled=args.unrolled,
         in_channels=in_channels,
         num_classes=num_classes,
         op_channels=args.op_channels,
         num_layers=args.num_layers,
         num_nodes=args.num_nodes,
-    ).to(cuda)
+    )
+    model.init_search(arch=arch)
 else:
     dataloaders = {
         "train"  : torch.utils.data.DataLoader(
@@ -160,18 +159,14 @@ else:
         )
     }
     
-    model = DARTTrainNetwork(
-        genotype=np.load(args.genotype),
+    model = model.Network(
         in_channels=in_channels,
         num_classes=num_classes,
         op_channels=args.op_channels,
         num_layers=args.num_layers,
         num_nodes=args.num_nodes,
-    ).to(cuda)
-
-
-model.verbose = True
-print(model, file=sys.stderr)
+    )
+    model.init_train(genotype=np.load(args.genotype))
 
 model.init_optimizer(
     opt=torch.optim.SGD,
@@ -183,6 +178,10 @@ model.init_optimizer(
     weight_decay=args.weight_decay,
     clip_grad_norm=5.0,
 )
+
+model = model.to(cuda)
+model.verbose = True
+print(model, file=sys.stderr)
 
 # --
 # Run

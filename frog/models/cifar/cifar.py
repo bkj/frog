@@ -1,127 +1,39 @@
 #!/usr/bin/env python
 
 """
-    dart_model.py
+  cifar.py
 """
-
-import os
-import sys
-import numpy as np
-from time import time
-from copy import deepcopy
 
 import torch
 from torch import nn
 from torch.nn import functional as F
-from torch.autograd import Variable
 
 from basenet import BaseNet
-from basenet.helpers import to_device, set_seeds
 
-from operations import *
-
-TORCH_VERSION_4 = '0.4' == torch.__version__[:3]
+from .operations import *
+from ...frog import FROGArchitecture, FROGSearchMixin
 
 # --
 # Architecture
 
-
-class DARTArchitecture(BaseNet):
-  def __init__(self, num_nodes, num_ops, num_prev=2, scale=1e-3):
-    super().__init__(loss_fn=F.cross_entropy)
-    
-    self.num_nodes = num_nodes
-    self.num_ops   = num_ops
-    self.num_prev  = num_prev
-    
-    n_edges     = num_prev * num_nodes + sum(range(num_nodes)) # Connections to inputs + connections to earlier num_nodes
-    self.normal = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
-    self.reduce = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
-  
-  def get_logits(self):
-    return self.normal, self.reduce
-    
-  def get_weights(self):
-    # !! Could do other logic in here
-    normal_weights = F.softmax(self.normal, dim=-1)
-    reduce_weights = F.softmax(self.reduce, dim=-1)
-    return normal_weights, reduce_weights
-  
-  def __repr__(self):
-    return 'DARTArchitecture(num_nodes=%d | num_ops=%d)' % (self.num_nodes, self.num_ops)
-  
-  def unrolled_train_batch(self, model, data_train, target_train, data_search, target_search, **kwargs):
-    # !! Could probably be simplified
-    
-    assert self.loss_fn is not None, 'DARTArchitecture: self.loss_fn is None'
-    assert self.training, 'DARTArchitecture: self.training == False'
-    
-    self.opt.zero_grad()
-    
-    if not TORCH_VERSION_4:
-        data_train, target_train = Variable(data_train), Variable(target_train)
-        data_search, target_search = Variable(data_search), Variable(target_search)
-    
-    data_train, target_train = to_device(data_train, self.device), to_device(target_train, self.device)
-    data_search, target_search = to_device(data_search, self.device), to_device(target_search, self.device)
-    
-    search_loss = self._compute_unrolled_grads(model, data_train, target_train, data_search, target_search)
-    
-    if self.clip_grad_norm > 0:
-        if TORCH_VERSION_4:
-            grad_norm = torch.nn.utils.clip_grad_norm_(self.params, self.clip_grad_norm)
-        else:
-            grad_norm = torch.nn.utils.clip_grad_norm(self.params, self.clip_grad_norm)
-    
-    self.opt.step()
-    
-    return float(search_loss)
-
-  def _compute_unrolled_grads(self, model, data_train, target_train, data_search, target_search):
-    
-    # Store model state
-    model = model.deepcopy()
-    wd = model.opt.state_dict()['param_groups'][0]['weight_decay']
-    assert wd == 3e-4 # !! Sanity check for now
-    
-    # Take a step
-    model.opt.zero_grad()
-    train_loss = self.loss_fn(model(data_train), target_train)
-    train_loss.backward()
-    model.opt.step()
-    
-    # Compute grad w.r.t architecture
-    search_loss    = self.loss_fn(model(data_search), target_search)
-    grads          = torch.autograd.grad(search_loss, [self.normal, self.reduce], retain_graph=True)
-    dtheta         = torch.autograd.grad(search_loss, model.parameters())
-    dtheta         = [dt.add(wd, t).data for dt, t in zip(dtheta, model.parameters())]
-    implicit_grads = self._hessian_vector_product(model, dtheta, data_train, target_train)
-    _ = [g.data.sub_(model.hp['lr'], ig.data) for g, ig in zip(grads, implicit_grads)]
-    
-    # Add gradient to architecture
-    for v, g in zip([self.normal, self.reduce], grads):
-      if v.grad is None:
-        v.grad = g.data
-      else:
-        v.grad.data.copy_(g.data)
-      
-    return float(search_loss)
-    
-  def _hessian_vector_product(self, model, dtheta, data, target, r=1e-2):
-    # Changes model weights
-    
-    R = r / torch.cat([v.view(-1) for v in dtheta]).norm()
-    
-    # plus R
-    _ = [p.data.add_(R, v) for p, v in zip(model.parameters(), dtheta)]
-    grads_pos = torch.autograd.grad(self.loss_fn(model(data), target), [self.normal, self.reduce])
-    
-    # minus R
-    _ = [p.data.sub_(2*R, v) for p, v in zip(model.parameters(), dtheta)]
-    grads_neg = torch.autograd.grad(self.loss_fn(model(data), target), [self.normal, self.reduce])
-    
-    return [(x - y).div_(2*R) for x, y in zip(grads_pos, grads_neg)]
-
+class Architecture(FROGArchitecture):
+    def __init__(self, num_nodes, num_prev=2, scale=1e-3):
+        super().__init__(loss_fn=F.cross_entropy)
+        
+        num_ops = len(PRIMITIVES)
+        
+        self.num_nodes = num_nodes
+        self.num_ops   = num_ops
+        self.num_prev  = num_prev
+        
+        n_edges     = num_prev * num_nodes + sum(range(num_nodes)) # Connections to inputs + connections to earlier num_nodes
+        self.normal = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
+        self.reduce = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
+        
+        self.__arch_params = [self.normal, self.reduce]
+        
+    def __repr__(self):
+        return 'CIFARArchitecture(num_nodes=%d | num_ops=%d)' % (self.num_nodes, self.num_ops)
 
 # --
 # DART Network
@@ -273,7 +185,7 @@ class DARTSearchCell(nn.Module):
       return super().__repr__()
 
 
-class _DARTNetwork(BaseNet):
+class Network(FROGSearchMixin, BaseNet):
   def __init__(self, in_channels, op_channels, num_classes, num_layers, num_nodes=4, cat_last=4, stem_multiplier=3, num_inputs=2):
     super().__init__(loss_fn=F.cross_entropy)
     
@@ -325,54 +237,3 @@ class _DARTNetwork(BaseNet):
     out = out.view(out.size(0),-1)
     out = self.classifier(out)
     return out
-
-
-class DARTSearchNetwork(_DARTNetwork):
-  def __init__(self, arch, unrolled=False, **kwargs):
-    super().__init__(**kwargs)
-    assert self.loss_fn == arch.loss_fn, "DARTSearchNetwork.loss_fn != arch.loss_fn"
-    
-    # A little awkward, but we don't want arch.parameters to show up in model.parameters
-    self._unrolled         = unrolled
-    self._arch_get_weights = arch.get_weights
-    self._arch_get_logits  = arch.get_logits
-    self._arch_train_batch = arch.unrolled_train_batch if unrolled else arch.train_batch
-    
-    self._fixed = False
-  
-  def deepcopy(self):
-    new_model = super().deepcopy()
-    new_model._arch_get_weights = self._arch_get_weights
-    new_model._arch_get_logits  = self._arch_get_logits 
-    new_model._arch_train_batch = self._arch_train_batch
-    return new_model
-  
-  def train_batch(self, data, target, metric_fns=None):
-    # t = time()
-    data_train, data_search = data
-    target_train, target_search = target
-    if self._unrolled:
-      self._arch_train_batch(model=self, data_train=data_train, target_train=target_train, data_search=data_search, target_search=target_search)
-    else:
-      self._arch_train_batch(data_search, target_search, forward=self.forward)
-    
-    loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
-    # print('loss', float(loss), time() - t)
-    return loss, metrics
-  
-  def checkpoint(self, outpath, epoch):
-    torch.save(self.state_dict(), os.path.join(outpath, 'weights.pt'))
-    normal_logits, reduce_logits = self._arch_get_logits()
-    torch.save(normal_logits, os.path.join(outpath, 'normal_arch_e%d.pt' % epoch))
-    torch.save(reduce_logits, os.path.join(outpath, 'reduce_arch_e%d.pt' % epoch))
-
-
-class DARTTrainNetwork(_DARTNetwork):
-  def __init__(self, genotype, *args, **kwargs):
-    super().__init__(*args, **kwargs)
-    self._fixed = True
-    for cell in self.cells:
-      cell.fix_weights(genotype)
-  
-  def checkpoint(self, outpath, epoch):
-    torch.save(self.state_dict(), os.path.join(outpath, 'weights_e%d.pt' % epoch))
