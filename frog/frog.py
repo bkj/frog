@@ -112,21 +112,24 @@ class FROGSearchMixin:
     self._arch_get_weights = arch.get_weights
     self._arch_get_params  = arch.get_params
     self._arch_train_batch = arch.unrolled_train_batch if unrolled else arch.train_batch
+    
+    self.train_batch = self._search_train_batch
   
   def init_train(self, genotype):
+    assert getattr(self, '_fixed', None) is None, "FROGSearchMixin: cannot call `init_train` right now"
     self._fixed = True
     for cell in self.cells:
       cell.fix_weights(genotype)
   
   def deepcopy(self):
-    assert not self._fixed, "DARTSearchNetwork: cannot deepcopy a fixed network (for no good reason...)"
+    assert self._fixed == False, "FROGSearchMixin: can only call `deepcopy` on a search network"
     new_model = super().deepcopy()
     new_model._arch_get_weights = self._arch_get_weights
     new_model._arch_get_params  = self._arch_get_params 
     new_model._arch_train_batch = self._arch_train_batch
     return new_model
   
-  def train_batch(self, data, target, metric_fns=None):
+  def _search_train_batch(self, data, target, metric_fns=None):
     data_train, data_search = data
     target_train, target_search = target
     

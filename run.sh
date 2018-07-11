@@ -2,7 +2,8 @@
 
 # run.sh
 
-source activate dart_env
+source activate py36
+
 
 RUN_ID="results/search/2"
 rm -rf $RUN_ID

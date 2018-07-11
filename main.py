@@ -38,8 +38,8 @@ torch.backends.cudnn.deterministic = True
 # CLI
 
 def parse_args():
-    parser = argparse.ArgumentParser("cifar")
-    parser.add_argument('--outpath', type=str, default="results/search/0")
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--outpath', type=str)
     parser.add_argument('--dataset', type=str, default='cifar10')
     parser.add_argument('--genotype', type=str)
 
@@ -64,13 +64,20 @@ def parse_args():
     return parser.parse_args()
 
 # --
-# Run
+# Init
 
 args = parse_args()
 set_seeds(args.seed)
 
+if args.outpath is not None:
+    json.dump(vars(args), open(os.path.join(args.outpath, 'config.json'), 'w'))
+else:
+    print('args.outpath is None -- will not save weights', file=sys.stderr)
+
 print(json.dumps(vars(args)), file=sys.stderr)
-json.dump(vars(args), open(os.path.join(args.outpath, 'config.json'), 'w'))
+
+# --
+# Data
 
 if args.dataset == 'cifar10':
     model = cifar
@@ -78,7 +85,7 @@ if args.dataset == 'cifar10':
     in_channels = 3
     num_classes = 10
 elif args.dataset == 'fashion_mnist':
-    raise Exception, 'no fashion_mnist model!'
+    raise Exception('no fashion_mnist model!')
     dataset_fn = datasets.FashionMNIST
     in_channels = 1
     num_classes = 10
@@ -90,8 +97,6 @@ if args.cutout_length > 0:
 
 train_data = dataset_fn(root='./data', train=True, download=False, transform=train_transform)
 valid_data = dataset_fn(root='./data', train=False, download=False, transform=valid_transform)
-
-cuda = 'cuda'
 
 if not args.genotype:
     train_indices, search_indices = train_test_split(np.arange(len(train_data)), train_size=0.5, random_state=789)
@@ -121,26 +126,6 @@ if not args.genotype:
             num_workers=NUM_WORKERS,
         )
     }
-    
-    arch = model.Architecture(num_nodes=args.num_nodes, num_ops=num_ops).to(cuda)
-    arch.init_optimizer(
-        opt=torch.optim.Adam,
-        params=arch.parameters(),
-        lr=args.arch_lr,
-        betas=(0.5, 0.999),
-        weight_decay=args.arch_weight_decay,
-        clip_grad_norm=10.0,
-    )
-    
-    model = model.Network(
-        unrolled=args.unrolled,
-        in_channels=in_channels,
-        num_classes=num_classes,
-        op_channels=args.op_channels,
-        num_layers=args.num_layers,
-        num_nodes=args.num_nodes,
-    )
-    model.init_search(arch=arch)
 else:
     dataloaders = {
         "train"  : torch.utils.data.DataLoader(
@@ -158,19 +143,37 @@ else:
             num_workers=NUM_WORKERS,
         )
     }
-    
-    model = model.Network(
-        in_channels=in_channels,
-        num_classes=num_classes,
-        op_channels=args.op_channels,
-        num_layers=args.num_layers,
-        num_nodes=args.num_nodes,
-    )
-    model.init_train(genotype=np.load(args.genotype))
 
-model.init_optimizer(
+# --
+# Define model
+
+net = model.Network(
+    in_channels=in_channels,
+    num_classes=num_classes,
+    op_channels=args.op_channels,
+    num_layers=args.num_layers,
+    num_nodes=args.num_nodes,
+)
+
+if not args.genotype:
+    arch = model.Architecture(num_nodes=args.num_nodes).to('cuda')
+    arch.init_optimizer(
+        opt=torch.optim.Adam,
+        params=arch.parameters(),
+        lr=args.arch_lr,
+        betas=(0.5, 0.999),
+        weight_decay=args.arch_weight_decay,
+        clip_grad_norm=10.0,
+    )
+    
+    net.init_search(arch=arch, unrolled=args.unrolled)
+else:
+    net.init_train(genotype=np.load(args.genotype))
+
+
+net.init_optimizer(
     opt=torch.optim.SGD,
-    params=model.parameters(),
+    params=net.parameters(),
     hp_scheduler={
         "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
     },
@@ -179,17 +182,17 @@ model.init_optimizer(
     clip_grad_norm=5.0,
 )
 
-model = model.to(cuda)
-model.verbose = True
-print(model, file=sys.stderr)
+net = net.to('cuda')
+net.verbose = True
+print(net, file=sys.stderr)
 
 # --
 # Run
 
 t = time()
 for epoch in range(args.epochs):
-    train = model.train_epoch(dataloaders, mode='train', compute_acc=True)
-    valid = model.eval_epoch(dataloaders, mode='valid', compute_acc=True)
+    train = net.train_epoch(dataloaders, mode='train', compute_acc=True)
+    valid = net.eval_epoch(dataloaders, mode='valid', compute_acc=True)
     
     print(json.dumps({
         "epoch"      : int(epoch),
@@ -197,8 +200,9 @@ for epoch in range(args.epochs):
         "train_acc"  : float(train['acc']),
         "valid_loss" : float(np.mean(valid['loss'])),
         "valid_acc"  : float(valid['acc']),
-        "model_lr"   : float(model.hp['lr']),
+        "net_lr"     : float(net.hp['lr']),
     }))
     sys.stdout.flush()
     
-    model.checkpoint(outpath=args.outpath, epoch=epoch)
+    if args.outpath is not None:
+        net.checkpoint(outpath=args.outpath, epoch=epoch)

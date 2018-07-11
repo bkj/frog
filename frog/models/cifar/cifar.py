@@ -4,6 +4,8 @@
   cifar.py
 """
 
+import numpy as np
+
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -30,7 +32,7 @@ class Architecture(FROGArchitecture):
         self.normal = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
         self.reduce = nn.Parameter(torch.Tensor(np.random.normal(0, scale, (n_edges, num_ops))))
         
-        self.__arch_params = [self.normal, self.reduce]
+        self._arch_params = [self.normal, self.reduce]
         
     def __repr__(self):
         return 'CIFARArchitecture(num_nodes=%d | num_ops=%d)' % (self.num_nodes, self.num_ops)
