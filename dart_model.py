@@ -348,7 +348,7 @@ class DARTSearchNetwork(_DARTNetwork):
     return new_model
   
   def train_batch(self, data, target, metric_fns=None):
-    t = time()
+    # t = time()
     data_train, data_search = data
     target_train, target_search = target
     if self._unrolled:
@@ -357,7 +357,7 @@ class DARTSearchNetwork(_DARTNetwork):
       self._arch_train_batch(data_search, target_search, forward=self.forward)
     
     loss, metrics = super().train_batch(data_train, target_train, metric_fns=metric_fns)
-    print('loss', float(loss), time() - t)
+    # print('loss', float(loss), time() - t)
     return loss, metrics
   
   def checkpoint(self, outpath, epoch):
