@@ -1,18 +1,15 @@
 #!/usr/bin/env python
 
 """
-    sample-arch.py
-    
-    Notice the pattern of "none" connections -- there's a bias
-    towards taking an edge from earlier layers.  This is stronger
-    in the normal layers, but still present in the reduce layers.
+    utils/sample-arch.py
 """
 
+import json
 import pickle
 import argparse
 import numpy as np
 from hashlib import md5
-from pprint import pprint
+from collections import namedtuple
 
 import torch
 from torch import nn
@@ -20,35 +17,37 @@ from torch.nn import functional as F
 from torch.autograd import Variable
 
 from basenet.helpers import to_numpy
-from operations import PRIMITIVES
-
-from collections import namedtuple
-Genotype = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat')
 
 np.set_printoptions(linewidth=120)
-
-assert PRIMITIVES[0] == 'none'
+Genotype = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat')
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--normal-path', type=str)
-    parser.add_argument('--reduce-path', type=str)
+    parser.add_argument('--arch-path', type=str)
+    parser.add_argument('--config-path', type=str)
     parser.add_argument('--outpath', type=str, required=True)
     
-    parser.add_argument('--num-nodes', type=int, default=4)
-    parser.add_argument('--cat-last', type=int, default=4)
-    parser.add_argument('--as-matrix', action="store_true")
-    
+    parser.add_argument('--dart-format', action="store_true")
     parser.add_argument('--random', action="store_true")
     parser.add_argument('--seed', type=int, default=123)
-    
     return parser.parse_args()
 
 
 # --
 # Helpers
 
+def prep_weight(logits, random):
+    logits = Variable(logits.data)
+    if random:
+        logits.data = torch.randn(logits.shape)
+    
+    return to_numpy(F.softmax(logits, dim=-1))
+
+
 def parse_genotype(weights, num_nodes):
+    raise Exception('!! need to point this to primitives')
+    from operations import PRIMITIVES
+    assert PRIMITIVES[0] == 'none'
     gene = []
     start = 0
     weights = weights[:,1:] # Drop nones
@@ -85,34 +84,27 @@ def parse_weights(weights, num_nodes):
 if __name__ == "__main__":
     args = parse_args()
     
-    normal_logits = torch.load(args.normal_path, map_location=lambda storage, loc: storage)
-    normal_logits = Variable(normal_logits.data)
-    if args.random:
-        normal_logits.data = torch.randn(normal_logits.shape)
-    normal_weights = to_numpy(F.softmax(normal_logits, dim=-1))
+    logits = torch.load(args.arch_path, map_location=lambda storage, loc: storage)
+    config = json.load(open(args.config_path))
     
-    reduce_logits = torch.load(args.reduce_path, map_location=lambda storage, loc: storage)
-    reduce_logits = Variable(reduce_logits.data)
-    if args.random:
-        reduce_logits.data = torch.randn(reduce_logits.shape)
-    reduce_weights = to_numpy(F.softmax(reduce_logits, dim=-1))
+    num_nodes = config['num_nodes']
+    cat_last  = config['cat_last']
     
-    if not args.as_matrix:
-        concat = list(range(2 + args.num_nodes - args.cat_last, args.num_nodes + 2))
+    weights = [prep_weight(logit, random=args.random) for logit in logits]
+    
+    if args.dart_format:
+        assert len(weights) == 2, "len(weights) != 2 -- unsupported by Genotype"
+        concat = list(range(2 + num_nodes - cat_last, num_nodes + 2))
         genotype = Genotype(
-          normal=parse_genotype(normal_weights, num_nodes=args.num_nodes),
+          normal=parse_genotype(normal_weights, num_nodes=num_nodes),
           normal_concat=concat,
-          reduce=parse_genotype(reduce_weights, num_nodes=args.num_nodes),
+          reduce=parse_genotype(reduce_weights, num_nodes=num_nodes),
           reduce_concat=concat,
         )
         pickle.dump(genotype, open(args.outpath, 'wb'))
     else:
-        normal_gene = parse_weights(normal_weights, num_nodes=args.num_nodes)
-        reduce_gene = parse_weights(reduce_weights, num_nodes=args.num_nodes)
-        genotype    = np.stack([
-            normal_gene,
-            reduce_gene
-        ])
+        genes    = [parse_weights(weight, num_nodes=num_nodes) for weight in weights]
+        genotype = np.stack(genes)
         np.save(args.outpath, genotype)
         
     print('hash=%s' % md5(str(genotype).encode()).hexdigest())

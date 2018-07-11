@@ -12,7 +12,7 @@ Genotype = namedtuple('Genotype', 'normal normal_concat reduce reduce_concat')
 OPS = {
   'none'         : lambda C, stride, affine: Zero(),
   'max_pool_3x3' : lambda C, stride, affine: nn.MaxPool2d(3, stride=stride, padding=1),
-  'skip_connect' : lambda C, stride, affine: Identity()
+  'skip_connect' : lambda C, stride, affine: Identity(),
   'conv_3x3'     : lambda C, stride, affine: ReLUConvBN(C, C, kernel_size=3, stride=stride, padding=1, affine=True),
 }
 

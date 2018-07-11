@@ -142,7 +142,7 @@ class FROGSearchMixin:
   
   def checkpoint(self, outpath, epoch):
     if self._fixed:
-        torch.save(self.state_dict(), os.path.join(outpath, 'fixed_weights_e%d.pt' % epoch))
+        torch.save(self.state_dict(), os.path.join(outpath, 'fixed_weights_e%s.pt' % str(epoch)))
     else:
-        torch.save(self.state_dict(), os.path.join(outpath, 'search_weights_e%d.pt' % epoch))
-        torch.save(self._arch_get_params(), os.path.join(outpath, 'search_arch_params_e%d.pt' % epoch))
+        torch.save(self.state_dict(), os.path.join(outpath, 'search_weights_e%s.pt' % str(epoch)))
+        torch.save(self._arch_get_params(), os.path.join(outpath, 'search_arch_params_e%s.pt' % str(epoch)))

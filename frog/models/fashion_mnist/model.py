@@ -67,7 +67,6 @@ class DARTEdge(nn.Module):
       return sum(w * getattr(self, p)(x) for w, p in zip(weights[1:], self._primitives[1:])) # Slower?
   
   def fix_weights(self, weights):
-    # !! Untested
     assert not self._fixed, 'DARTEdge: already fixed'
     self._fixed = True
     tmp_primitives, tmp_weights = [], []
@@ -146,7 +145,6 @@ class DARTSearchCell(nn.Module):
     for node_meta in self.meta:
       node = getattr(self, node_meta['node_name'])
       if not self._fixed:
-        
         s = sum(getattr(node, edge_meta['edge_name'])(states[edge_meta['state_offset']], weights=weights[edge_meta['weight_offset']]) for edge_meta in node.meta)
       else:
         s = sum(getattr(node, edge_meta['edge_name'])(states[edge_meta['state_offset']], weights=None) for edge_meta in node.meta)
@@ -225,13 +223,13 @@ class Network(FROGSearchMixin, BaseNet):
   def forward(self, x):
     weights = None
     if not self._fixed:
-      normal_weights, reduce_weights = self._arch_get_weights()
+      weights = self._arch_get_weights()[0]
     
     x = self.stem(x)
     states = [x] * self.num_inputs
     for cell in self.cells:
-      if not self._fixed:
-        weights = normal_weights if not cell.reduction else reduce_weights
+      # if not self._fixed:
+      #   weights = normal_weights if not cell.reduction else reduce_weights
       states = states[1:] + [cell(states, weights)]
     
     out = self.global_pooling(states[-1])
