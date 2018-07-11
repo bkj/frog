@@ -348,7 +348,7 @@ class DARTSearchNetwork(_DARTNetwork):
     return new_model
   
   def train_batch(self, data, target, metric_fns=None):
-    t = time()
+    # t = time()
     data_train, data_search = data
     target_train, target_search = target
     if self._unrolled:
