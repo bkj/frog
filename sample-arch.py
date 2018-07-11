@@ -31,13 +31,16 @@ assert PRIMITIVES[0] == 'none'
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--normal-path', type=str, default='results/search/0/normal_arch_e49.pt')
-    parser.add_argument('--reduce-path', type=str, default='results/search/0/reduce_arch_e49.pt')
-    parser.add_argument('--outpath', type=str)
+    parser.add_argument('--normal-path', type=str)
+    parser.add_argument('--reduce-path', type=str)
+    parser.add_argument('--outpath', type=str, required=True)
     
     parser.add_argument('--num-nodes', type=int, default=4)
     parser.add_argument('--cat-last', type=int, default=4)
     parser.add_argument('--as-matrix', action="store_true")
+    
+    parser.add_argument('--random', action="store_true")
+    parser.add_argument('--seed', type=int, default=123)
     
     return parser.parse_args()
 
@@ -83,30 +86,33 @@ if __name__ == "__main__":
     args = parse_args()
     
     normal_logits = torch.load(args.normal_path, map_location=lambda storage, loc: storage)
-    reduce_logits = torch.load(args.reduce_path, map_location=lambda storage, loc: storage)
-    
     normal_logits = Variable(normal_logits.data)
-    reduce_logits = Variable(reduce_logits.data)
-    
+    if args.random:
+        normal_logits.data = torch.randn(normal_logits.shape)
     normal_weights = to_numpy(F.softmax(normal_logits, dim=-1))
+    
+    reduce_logits = torch.load(args.reduce_path, map_location=lambda storage, loc: storage)
+    reduce_logits = Variable(reduce_logits.data)
+    if args.random:
+        reduce_logits.data = torch.randn(reduce_logits.shape)
     reduce_weights = to_numpy(F.softmax(reduce_logits, dim=-1))
     
     if not args.as_matrix:
-        normal_gene = parse_genotype(normal_weights, num_nodes=args.num_nodes)
-        reduce_gene = parse_genotype(reduce_weights, num_nodes=args.num_nodes)
-        
         concat = list(range(2 + args.num_nodes - args.cat_last, args.num_nodes + 2))
         genotype = Genotype(
-          normal=normal_gene,
+          normal=parse_genotype(normal_weights, num_nodes=args.num_nodes),
           normal_concat=concat,
-          reduce=reduce_gene,
+          reduce=parse_genotype(reduce_weights, num_nodes=args.num_nodes),
           reduce_concat=concat,
         )
         pickle.dump(genotype, open(args.outpath, 'wb'))
     else:
         normal_gene = parse_weights(normal_weights, num_nodes=args.num_nodes)
         reduce_gene = parse_weights(reduce_weights, num_nodes=args.num_nodes)
-        genotype    = np.stack([normal_gene, reduce_gene])
+        genotype    = np.stack([
+            normal_gene,
+            reduce_gene
+        ])
         np.save(args.outpath, genotype)
         
     print('hash=%s' % md5(str(genotype).encode()).hexdigest())
