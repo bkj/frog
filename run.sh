@@ -7,6 +7,7 @@ source activate dart_env
 RUN_ID="results/search/2"
 rm -rf $RUN_ID
 mkdir -p $RUN_ID
+mkdir -p $RUN_ID/train
 CUDA_VISIBLE_DEVICES=5 python main.py \
     --outpath $RUN_ID \
     --unrolled | tee $RUN_ID/log.jl
@@ -16,9 +17,11 @@ python sample-arch.py \
     --reduce-path $RUN_ID/reduce_arch_e49.pt \
     --outpath $RUN_ID/genotype.pkl
 
-
-# CUDA_VISIBLE_DEVICES=4 python main.py --outpath results/search/1 |\
-#     tee results/search/1/log.jl
+# CUDA_VISIBLE_DEVICES=7 python main.py \
+#     --genotype $RUN_ID/genotype.npy \
+#     --layers 20 \
+#     --epochs 600 \
+#     --outpath $RUN_ID/train | tee $RUN_ID/train.jl
 
 
 # --
