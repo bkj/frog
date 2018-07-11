@@ -40,8 +40,8 @@ torch.backends.cudnn.deterministic = True
 
 def parse_args():
     parser = argparse.ArgumentParser("cifar")
-    parser.add_argument('--outpath', type=str, default="results/search/0")
-    parser.add_argument('--dataset', type=str, default='cifar10')
+    parser.add_argument('--outpath', type=str)
+    parser.add_argument('--dataset', type=str)
     parser.add_argument('--genotype', type=str)
 
     parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
@@ -127,7 +127,9 @@ if not args.genotype:
     arch.init_optimizer(
         opt=torch.optim.Adam,
         params=arch.parameters(),
-        lr=args.arch_lr,
+        hp_scheduler={
+            "lr" : lambda progress: args.arch_lr,
+        },
         betas=(0.5, 0.999),
         weight_decay=args.arch_weight_decay,
         clip_grad_norm=10.0,
@@ -173,11 +175,12 @@ else:
 model.verbose = True
 print(model, file=sys.stderr)
 
+lr_scheduler = HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min)
 model.init_optimizer(
     opt=torch.optim.SGD,
     params=model.parameters(),
     hp_scheduler={
-        "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
+        "lr" : lr_scheduler,
     },
     momentum=args.momentum,
     weight_decay=args.weight_decay,
