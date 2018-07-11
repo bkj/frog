@@ -114,9 +114,10 @@ class Zero(nn.Module):
     self.stride = stride
 
   def forward(self, x):
-    if self.stride == 1:
-      return x.mul(0.)
-    return x[:,:,::self.stride,::self.stride].mul(0.)
+    raise Exception # This should never get called
+    # if self.stride == 1:
+    #   return x.mul(0.)
+    # return x[:,:,::self.stride,::self.stride].mul(0.)
 
   def __repr__(self):
     return "Zero(stride=%d)" % stride

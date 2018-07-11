@@ -1,1 +1,1 @@
-from .cifar import Architecture, Network
+from .model import Architecture, Network

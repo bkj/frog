@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-  cifar.py
+  cifar/model.py
 """
 
 import numpy as np
@@ -63,8 +63,9 @@ class DARTEdge(nn.Module):
     if self._fixed:
       weights = self._weights
       assert len(weights) == len(self._primitives)
-    
-    return sum(w * getattr(self, p)(x) for w, p in zip(weights, self._primitives)) # Slower?
+      return sum(w * getattr(self, p)(x) for w, p in zip(weights, self._primitives)) # Slower?
+    else:
+      return sum(w * getattr(self, p)(x) for w, p in zip(weights[1:], self._primitives[1:])) # Slower?
   
   def fix_weights(self, weights):
     # !! Untested

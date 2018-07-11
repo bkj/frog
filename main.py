@@ -26,7 +26,7 @@ from basenet.helpers import set_seeds
 from basenet import BaseNet, Metrics, HPSchedule
 from basenet.vision import transforms as btransforms
 
-from frog.models import cifar
+from frog.models import cifar, fashion_mnist
 
 NUM_WORKERS = 6
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -40,7 +40,7 @@ torch.backends.cudnn.deterministic = True
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--outpath', type=str)
-    parser.add_argument('--dataset', type=str, default='cifar10')
+    parser.add_argument('--dataset', type=str)
     parser.add_argument('--genotype', type=str)
 
     parser.add_argument('--epochs', type=int, default=50, help='num of training epochs')
@@ -171,11 +171,12 @@ else:
     net.init_train(genotype=np.load(args.genotype))
 
 
+lr_scheduler = HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min)
 net.init_optimizer(
     opt=torch.optim.SGD,
     params=net.parameters(),
     hp_scheduler={
-        "lr" : HPSchedule.sgdr(hp_max=args.lr_max, period_length=args.epochs, hp_min=args.lr_min),
+        "lr" : lr_scheduler,
     },
     momentum=args.momentum,
     weight_decay=args.weight_decay,
