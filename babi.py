@@ -98,7 +98,13 @@ arch.init_optimizer(
     clip_grad_norm=10.0,
 )
 
-model = babi.Network(X_width=story_width, q_width=query_width, num_words=num_words, num_classes=num_classes)
+model = babi.Network(
+    X_width=story_width,
+    q_width=query_width,
+    num_words=num_words,
+    num_classes=num_classes,
+    emb_dim=20,
+)
 model.init_search(arch=arch, unrolled=unrolled)
 model.init_optimizer(
     torch.optim.Adam,

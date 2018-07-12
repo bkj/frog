@@ -151,6 +151,8 @@ class Network(FROGSearchMixin, BaseNet):
             params=params[1],
         )
         
+        # !! Does not have enough capacity to answer the more complicated questions
+        
         # # --
         # # Block 2
         
