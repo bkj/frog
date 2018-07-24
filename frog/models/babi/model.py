@@ -141,6 +141,8 @@ class Network(FROGSearchMixin, BaseNet):
             params=params[0],
         )
         
+        out0 = out0 + flat_q0
+        
         # --
         # Block 1
         
@@ -151,31 +153,35 @@ class Network(FROGSearchMixin, BaseNet):
             params=params[1],
         )
         
-        # !! Does not have enough capacity to answer the more complicated questions
+        out1 = out1 + out0
         
-        # # --
-        # # Block 2
+        # --
+        # Block 2
         
-        # flat_x2, square_x2, flat_q2, square_q2 = self.story_block_2(x, q)
-        # out2, soft2 = matvec_op(
-        #     vs=(flat_x2, flat_q2, out1, soft1, out0, soft0),
-        #     ms=(square_x2, square_q2),
-        #     # vs=(flat_q0,),
-        #     # ms=(square_x2,),
-        #     params=params[2],
-        # )
+        flat_x2, square_x2, flat_q2, square_q2 = self.story_block_2(x, q)
+        out2, soft2 = matvec_op(
+            vs=(flat_x2, flat_q2, out1, soft1, out0, soft0),
+            ms=(square_x2, square_q2),
+            # vs=(flat_q0,),
+            # ms=(square_x2,),
+            params=params[2],
+        )
         
-        # # --
-        # # Block 3
+        out2 = out2 + out1
         
-        # flat_x3, square_x3, flat_q3, square_q3 = self.story_block_3(x, q)
-        # out3, _ = matvec_op(
-        #     vs=(flat_x3, flat_q3, out2, soft2, out1, soft1, out0, soft0),
-        #     ms=(square_x3, square_q3),
-        #     # vs=(soft2,),
-        #     # ms=(square_x3,),
-        #     params=params[3],
-        # )
+        # --
+        # Block 3
         
-        out = out1
+        flat_x3, square_x3, flat_q3, square_q3 = self.story_block_3(x, q)
+        out3, _ = matvec_op(
+            vs=(flat_x3, flat_q3, out2, soft2, out1, soft1, out0, soft0),
+            ms=(square_x3, square_q3),
+            # vs=(soft2,),
+            # ms=(square_x3,),
+            params=params[3],
+        )
+        
+        out3 = out3 + out2
+        
+        out = out3
         return self.classifier(out)

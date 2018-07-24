@@ -93,31 +93,35 @@ arch = babi.Architecture().to('cuda')
 arch.init_optimizer(
     opt=torch.optim.Adam,
     params=arch.parameters(),
-    betas=(0.5, 0.999),
-    lr=1e-3,
+    # betas=(0.9, 0.999),
+    lr=1e-4,
     clip_grad_norm=10.0,
 )
 
-model = babi.Network(
-    X_width=story_width,
-    q_width=query_width,
-    num_words=num_words,
-    num_classes=num_classes,
-    emb_dim=20,
-)
-model.init_search(arch=arch, unrolled=unrolled)
-model.init_optimizer(
-    torch.optim.Adam,
-    params=model.parameters(),
-    hp_scheduler={
-        "lr" : lambda progress: 1e-2,
-        # "lr" : HPSchedule.linear(hp_max=0.005, epochs=epochs),
-    },
-    clip_grad_norm=10.0,
-)
-model = model.to('cuda')
+def make_model():
+    model = babi.Network(
+        X_width=story_width,
+        q_width=query_width,
+        num_words=num_words,
+        num_classes=num_classes,
+        emb_dim=64,
+    )
+    model.init_search(arch=arch, unrolled=unrolled)
+    model.init_optimizer(
+        torch.optim.Adam,
+        params=model.parameters(),
+        hp_scheduler={
+            # "lr" : lambda progress: 1e-2,
+            "lr" : HPSchedule.linear(hp_max=1e-2, epochs=1),
+        },
+        clip_grad_norm=10.0,
+    )
+    model = model.to('cuda')
+    
+    model.verbose = False
+    return model
 
-model.verbose = False
+model = make_model()
 
 t = time()
 for epoch in range(epochs):
@@ -129,7 +133,9 @@ for epoch in range(epochs):
         "test_acc"  : float(test['acc']),
         "elapsed"   : time() - t,
     })
-    # w0 = model._arch_get_params()[0]
-    # print(w0[:,:5])
-
+    w0 = model._arch_get_params()[0]
+    print((to_numpy(w0[:,:5]) * 100).round(2))
+    
+    set_seeds(123)
+    model = make_model()
 
